@@ -55,7 +55,10 @@ Session names are auto-generated as `nvim@<dirname>`.
 1. Installs `python-pynvim` (Arch/CachyOS only, skipped otherwise)
 2. Clones TPM if not present
 3. Installs the `kiyoon/treemux` plugin via TPM headless install
-4. Creates symlinks for `nvim-treemux/` config and `ensure_treemux.sh`
+4. Creates symlinks:
+   - `~/.config/nvim` → `tdl/nvim/` (main nvim config)
+   - `~/.config/nvim-treemux/` files → `tdl/nvim-treemux/`
+   - `~/.config/tmux/ensure_treemux.sh` → `tdl/ensure_treemux.sh`
 5. Bootstraps nvim-treemux plugins headlessly via `lazy sync`
 6. Injects `source` lines into `~/.config/.aliases` and `~/.config/tmux/.tmux.conf` (idempotent)
 

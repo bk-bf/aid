@@ -37,8 +37,15 @@ else
   echo "==> treemux plugin already present"
 fi
 
-# ── 4. Symlinks: nvim-treemux config ─────────────────────────────────────────
+# ── 4. Symlinks ───────────────────────────────────────────────────────────────
 echo "==> Creating symlinks..."
+
+# ~/.config/nvim → tdl/nvim/  (main nvim config)
+if [[ -d "$HOME/.config/nvim" && ! -L "$HOME/.config/nvim" ]]; then
+  echo "  WARNING: ~/.config/nvim is a real directory — backing up to ~/.config/nvim.bak"
+  mv "$HOME/.config/nvim" "$HOME/.config/nvim.bak"
+fi
+ln -sfn "$TDL/nvim" "$HOME/.config/nvim"
 
 # ~/.config/nvim-treemux/ → tdl/nvim-treemux/
 mkdir -p "$HOME/.config/nvim-treemux"

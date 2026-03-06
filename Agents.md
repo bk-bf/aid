@@ -2,18 +2,22 @@
 
 ## What this repo is
 
-tdl is a portable terminal IDE layout built on tmux + treemux + nvim.
-It consists of three panes: treemux file-tree sidebar (left), nvim editor + shell (middle), opencode (right).
-The full setup — shell functions, tmux config, nvim sidebar config, and install script — lives here so it can be installed independently of the main dotfiles repo.
+tdl is a self-contained terminal IDE: tmux layout + nvim config + treemux sidebar, all in one repo.
+Three panes: treemux file-tree sidebar (left), nvim editor + shell (middle), opencode (right).
+A fresh clone + `install.sh` gives a fully working IDE on any machine — no dotfiles repo required.
 
 ## Repo layout
 
 ```
 tdl/
 ├── install.sh              # one-shot setup: TPM, treemux plugin, symlinks, headless nvim bootstrap
+├── boot.sh                 # curl bootstrapper — clones repo then runs install.sh
 ├── aliases.sh              # sourced by ~/.config/.aliases — tdl() launcher, nvim() wrapper
 ├── tmux.conf               # sourced by ~/.config/tmux/.tmux.conf — treemux plugin config
 ├── ensure_treemux.sh       # idempotent sidebar opener; symlinked to ~/.config/tmux/ensure_treemux.sh
+├── nvim/
+│   ├── init.lua            # main nvim config (plugins, LSP, keymaps, options)
+│   └── lazy-lock.json      # plugin lockfile
 ├── nvim-treemux/
 │   ├── treemux_init.lua    # isolated nvim config for the sidebar instance (NVIM_APPNAME=nvim-treemux)
 │   └── watch_and_update.sh # custom fork of upstream script; always cd-follows root
@@ -24,6 +28,7 @@ tdl/
 
 | Repo file | Symlinked to |
 |---|---|
+| `nvim/` | `~/.config/nvim` |
 | `nvim-treemux/treemux_init.lua` | `~/.config/nvim-treemux/treemux_init.lua` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/nvim-treemux/watch_and_update.sh` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/tmux/plugins/treemux/scripts/tree/watch_and_update.sh` |
@@ -84,7 +89,8 @@ source ~/.local/share/tdl/aliases.sh
 source-file ~/.local/share/tdl/tmux.conf
 ```
 
-The symlinks inside `~/.config/` that point into this repo are hidden via `.git/info/exclude` in the dotfiles repo (not `.gitignore`) so they don't appear as untracked files.
+`~/.config/nvim` is a symlink into this repo (`tdl/nvim/`) — it is **not** tracked in bk-bf/.config.
+The symlink is hidden in the dotfiles repo via `.gitignore` (removed from the `!/nvim/` whitelist).
 
 ## Repo structure (bare + worktrees)
 

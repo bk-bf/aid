@@ -18,16 +18,20 @@ A portable terminal IDE layout: **treemux sidebar** | **nvim** | **opencode**, a
 
 ## Install
 
-Clone anywhere, then run `install.sh`:
+One-liner:
 
 ```bash
-git clone https://github.com/bk-bf/tdl.git
-cd tdl
-bash install.sh
+curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash
 ```
 
-`install.sh` auto-detects its own location and injects the correct paths into
-`~/.config/.aliases` and `~/.config/tmux/.tmux.conf`. No hardcoded paths.
+Clones to `~/Documents/Projects/special_projects/tdl` by default. Override with `TDL_DIR`:
+
+```bash
+TDL_DIR=~/tdl curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash
+```
+
+`install.sh` auto-injects the correct paths into `~/.config/.aliases` and
+`~/.config/tmux/.tmux.conf`. Re-running is safe — idempotent.
 
 ## Usage
 

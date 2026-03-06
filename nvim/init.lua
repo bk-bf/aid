@@ -502,7 +502,7 @@ require("lazy").setup({
       { "<S-Tab>",     "<cmd>BufferLineCyclePrev<cr>", desc = "Prev tab" },
       { "<leader>q",   "<cmd>bdelete<cr>",             desc = "Close tab" },
       { "<leader>tb",  function()
-          vim.o.showtabline = vim.o.showtabline == 0 and 2 or 0
+          vim.o.showtabline = vim.o.showtabline == 2 and 1 or 2
         end, desc = "Toggle tab bar" },
     },
   },
@@ -763,6 +763,9 @@ vim.opt.autoread = true
 
 -- Status line: hidden (tmux bar handles global status across panes)
 vim.opt.laststatus = 0
+
+-- Tab bar: always visible (bufferline renders even with a single buffer)
+vim.opt.showtabline = 2
 
 -- ============================================================
 -- APPEARANCE

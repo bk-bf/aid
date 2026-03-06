@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # install.sh — set up tdl on a fresh machine
 # Run once after cloning: bash install.sh
+#
+# Isolation guarantee
+# ───────────────────
+# tdl never touches ~/.config/nvim or ~/.config/tmux/.tmux.conf.
+# The main editor runs as NVIM_APPNAME=nvim-tdl (config in ~/.config/nvim-tdl).
+# The sidebar runs as NVIM_APPNAME=nvim-treemux (config in ~/.config/nvim-treemux).
+# tmux runs on a dedicated server socket (tmux -L tdl) with -f pointing directly
+# at tdl/tmux.conf, so the user's existing tmux setup is never loaded or modified.
 set -euo pipefail
 
 TDL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,12 +35,12 @@ fi
 TREEMUX_DIR="$HOME/.config/tmux/plugins/treemux"
 if [[ ! -d "$TREEMUX_DIR" ]]; then
   echo "==> Installing treemux via TPM..."
-  # TPM headless install requires a running tmux server
-  # Start a throwaway server, source the config, install plugins, kill server
-  tmux new-session -d -s _tdl_install 2>/dev/null || true
-  tmux source-file "$HOME/.config/tmux/.tmux.conf" 2>/dev/null || true
-  "$TPM_DIR/bin/install_plugins"
-  tmux kill-session -t _tdl_install 2>/dev/null || true
+  # TPM headless install requires a running tmux server.
+  # Use the isolated tdl server so we never touch the user's tmux setup.
+  tmux -L tdl -f "$TDL/tmux.conf" new-session -d -s _tdl_install 2>/dev/null || true
+  TMUX_PLUGIN_MANAGER_PATH="$HOME/.config/tmux/plugins/" \
+    "$TPM_DIR/bin/install_plugins"
+  tmux -L tdl kill-session -t _tdl_install 2>/dev/null || true
 else
   echo "==> treemux plugin already present"
 fi
@@ -40,17 +48,19 @@ fi
 # ── 4. Symlinks ───────────────────────────────────────────────────────────────
 echo "==> Creating symlinks..."
 
-# ~/.config/nvim → tdl/nvim/  (main nvim config)
-if [[ -d "$HOME/.config/nvim" && ! -L "$HOME/.config/nvim" ]]; then
-  echo "  WARNING: ~/.config/nvim is a real directory — backing up to ~/.config/nvim.bak"
-  mv "$HOME/.config/nvim" "$HOME/.config/nvim.bak"
+# ~/.config/nvim-tdl → tdl/nvim/  (main editor — isolated from ~/.config/nvim)
+if [[ -d "$HOME/.config/nvim-tdl" && ! -L "$HOME/.config/nvim-tdl" ]]; then
+  echo "  WARNING: ~/.config/nvim-tdl is a real directory — backing up to ~/.config/nvim-tdl.bak"
+  mv "$HOME/.config/nvim-tdl" "$HOME/.config/nvim-tdl.bak"
 fi
-ln -sfn "$TDL/nvim" "$HOME/.config/nvim"
+ln -sfn "$TDL/nvim" "$HOME/.config/nvim-tdl"
+echo "  ~/.config/nvim-tdl -> $TDL/nvim"
 
 # ~/.config/nvim-treemux/ → tdl/nvim-treemux/
 mkdir -p "$HOME/.config/nvim-treemux"
 ln -sf "$TDL/nvim-treemux/treemux_init.lua"    "$HOME/.config/nvim-treemux/treemux_init.lua"
 ln -sf "$TDL/nvim-treemux/watch_and_update.sh" "$HOME/.config/nvim-treemux/watch_and_update.sh"
+echo "  ~/.config/nvim-treemux/* -> $TDL/nvim-treemux/*"
 
 # treemux plugin's watch script → our custom version
 ln -sf "$TDL/nvim-treemux/watch_and_update.sh" \
@@ -59,7 +69,7 @@ ln -sf "$TDL/nvim-treemux/watch_and_update.sh" \
 # ~/.config/tmux/ensure_treemux.sh → tdl/ensure_treemux.sh
 ln -sf "$TDL/ensure_treemux.sh" "$HOME/.config/tmux/ensure_treemux.sh"
 
-# ── 5. nvim-treemux plugin bootstrap (headless lazy sync) ────────────────────
+# ── 5. nvim plugin bootstrap (headless lazy sync) ─────────────────────────────
 _spin() {
   local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 msg="$1"
   while kill -0 "$2" 2>/dev/null; do
@@ -73,43 +83,30 @@ echo "==> Bootstrapping nvim-treemux plugins (lazy sync)..."
 NVIM_APPNAME=nvim-treemux nvim --headless "+Lazy! sync" +qa 2>/dev/null &
 _nvim_pid=$!
 _spin "syncing nvim-treemux plugins…" $_nvim_pid
-wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run, plugins still installed)"
+wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
 
-echo "==> Bootstrapping main nvim plugins (lazy sync)..."
-nvim --headless "+Lazy! sync" +qa 2>/dev/null &
+echo "==> Bootstrapping nvim-tdl plugins (lazy sync)..."
+NVIM_APPNAME=nvim-tdl nvim --headless "+Lazy! sync" +qa 2>/dev/null &
 _nvim_pid=$!
-_spin "syncing main nvim plugins…" $_nvim_pid
-wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run, plugins still installed)"
+_spin "syncing nvim-tdl plugins…" $_nvim_pid
+wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
 
-# ── 6. Shell integration — inject source lines if not already present ────────
+# ── 6. Shell integration — inject aliases source line ────────────────────────
 echo "==> Wiring shell integration..."
 
 ALIASES_FILE="$HOME/.config/.aliases"
-TMUX_CONF="$HOME/.config/tmux/.tmux.conf"
 ALIASES_LINE="source $TDL/aliases.sh"
-TMUX_LINE="source-file $TDL/tmux.conf"
 
 if [[ -f "$ALIASES_FILE" ]]; then
   if grep -qF "$ALIASES_LINE" "$ALIASES_FILE"; then
     echo "==> $ALIASES_FILE already sources aliases.sh"
   else
-    printf '\n# tdl IDE layout (treemux | nvim | opencode)\n%s\n' "$ALIASES_LINE" >> "$ALIASES_FILE"
+    printf '\n# tdl IDE\n%s\n' "$ALIASES_LINE" >> "$ALIASES_FILE"
     echo "==> Added source line to $ALIASES_FILE"
   fi
 else
   echo "==> $ALIASES_FILE not found — add manually: $ALIASES_LINE"
 fi
 
-if [[ -f "$TMUX_CONF" ]]; then
-  if grep -qF "$TMUX_LINE" "$TMUX_CONF"; then
-    echo "==> $TMUX_CONF already sources tmux.conf"
-  else
-    printf '\n# tdl IDE layout — treemux plugin config, Tab keybind, session hook\n%s\n' "$TMUX_LINE" >> "$TMUX_CONF"
-    echo "==> Added source-file line to $TMUX_CONF"
-  fi
-else
-  echo "==> $TMUX_CONF not found — add manually: $TMUX_LINE"
-fi
-
 echo ""
-echo "==> tdl install complete. Reload tmux with: tmux source-file ~/.config/tmux/.tmux.conf"
+echo "==> tdl install complete. Run 'tdl' in any directory to launch the IDE."

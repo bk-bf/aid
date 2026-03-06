@@ -2,9 +2,11 @@
 
 ## What this repo is
 
-tdl is a self-contained terminal IDE: tmux layout + nvim config + treemux sidebar, all in one repo.
-Three panes: treemux file-tree sidebar (left), nvim editor + shell (middle), opencode (right).
-A fresh clone + `install.sh` gives a fully working IDE on any machine — no dotfiles repo required.
+tdl is an open-source, terminal-native AI IDE: tmux workspace orchestration + nvim config + persistent AI assistant pane, all in one repo.
+
+It reconstructs the VS Code/Cursor UX in the terminal — three persistent panes: file-tree sidebar (left), nvim editor + shell (middle), Opencode AI assistant (right). A single `boot.sh` curl gives a fully working IDE on any machine. No dotfiles repo required.
+
+**Identity**: not a Neovim distribution (like LazyVim) — a *workspace environment* that orchestrates multiple nvim instances and tmux panes into a cohesive IDE. Cursor equivalent built on open-source tools.
 
 ## Repo layout
 
@@ -54,6 +56,15 @@ At a 154-col terminal: sidebar=21, editor≈86, opencode≈45.
 - `tdl <name>`: attaches to an existing named session.
 - `nvim()` wrapper: calls `ensure_treemux.sh` before launching nvim when inside tmux, so the sidebar is always open when editing.
 - Session names follow the pattern `nvim@<dirname>`, deduplicated with numeric suffix (`nvim@foo2`, etc.).
+- Workspace state (sidebar, session name) survives session reattach, `cd`, and editor restarts.
+
+## Unique features vs. other tools
+
+- **Persistent sidebar**: separate `NVIM_APPNAME=nvim-treemux` nvim instance — never closes on focus loss, tracks any `cd` (custom `watch_and_update.sh`).
+- **Cross-project bookmarks**: global bookmarks stored in `~/.local/share/nvim/global_bookmarks` — works across unrelated directories, unlike Harpoon (project-scoped).
+- **Unified statusline**: `vim-tpipeline` exports nvim's statusline to the tmux status bar, visible across all panes.
+- **Lazygit worktree fix**: `<leader>gg` keybind detects bare-repo worktree `.git` files, resolves `git rev-parse --git-dir` (worktree-specific, not `--git-common-dir`), and sets `GIT_DIR`/`GIT_WORK_TREE` before opening lazygit — works correctly from any worktree branch.
+- **Opencode as persistent tmux pane**: AI assistant lives alongside the editor, not inside it — survives editor restarts, can interact with the terminal directly.
 
 ## nvim-treemux plugins
 

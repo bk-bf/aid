@@ -1,20 +1,32 @@
 # tdl
 
-A portable terminal IDE layout: **treemux sidebar** | **nvim** | **opencode**, all wired up and ready to clone and run.
+An open-source, terminal-native AI IDE. VS Code's layout and Cursor's AI workflow — built on tmux + Neovim + Opencode. No Electron. No vendor lock-in. Runs over SSH.
 
 ## Layout
 
 ```
 ┌──────────┬──────────────────────────────┬───────────────┐
-│ nvim-tree│         nvim editor          │   opencode    │
+│ file     │         nvim editor          │   opencode    │
 │ sidebar  │                              │               │
 │ (21 cols)│         + shell              │   (~29% wide) │
 └──────────┴──────────────────────────────┴───────────────┘
 ```
 
-- **Left**: treemux sidebar (nvim-tree, oil, neo-tree) — isolated `NVIM_APPNAME=nvim-treemux` instance
-- **Middle**: your main nvim + a terminal below it
-- **Right**: opencode, launched automatically on `tdl`
+- **Left**: persistent treemux sidebar — isolated `NVIM_APPNAME=nvim-treemux` instance, always visible, tracks `cd` globally
+- **Middle**: main nvim editor + terminal below
+- **Right**: Opencode AI assistant, persistent tmux pane, survives editor restarts
+
+## Why tdl
+
+| | VS Code / Cursor | LazyVim | tdl |
+|---|---|---|---|
+| Terminal-native | No | Yes | Yes |
+| Persistent AI pane | Cursor only (proprietary) | No | Yes (Opencode, MIT) |
+| Persistent sidebar | Yes | Toggle only | Yes |
+| Cross-project bookmarks | Yes | No (Harpoon is project-scoped) | Yes |
+| Workspace session state | Yes | No | Yes |
+| SSH-friendly | No | Yes | Yes |
+| Single `curl` install | No | No | Yes |
 
 ## Install
 

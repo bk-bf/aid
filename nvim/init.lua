@@ -4,6 +4,124 @@
 vim.g.mapleader = " "
 
 -- ============================================================
+-- CHEATSHEET
+-- ============================================================
+-- Opens nvim/cheatsheet.md as a styled read-only welcome buffer.
+-- Auto-dismissed when any real file is opened. Re-open: <leader>?
+
+local _cs_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h") .. "/cheatsheet.md"
+local _cs_buf = nil  -- track the cheatsheet buffer number
+
+local function _cs_is_cheatsheet(buf)
+  return vim.api.nvim_buf_is_valid(buf)
+    and vim.api.nvim_buf_get_name(buf):find("cheatsheet%.md$") ~= nil
+end
+
+local function _cs_apply_style(buf)
+  vim.bo[buf].modifiable  = false
+  vim.bo[buf].readonly    = true
+  vim.bo[buf].buflisted   = false
+  vim.bo[buf].buftype     = "nofile"
+  vim.bo[buf].swapfile    = false
+  vim.api.nvim_buf_set_name(buf, "cheatsheet.md")
+
+  local win = vim.fn.bufwinid(buf)
+  if win ~= -1 then
+    vim.wo[win].number         = false
+    vim.wo[win].relativenumber = false
+    vim.wo[win].signcolumn     = "no"
+    vim.wo[win].foldcolumn     = "0"
+    vim.wo[win].statuscolumn   = ""
+    vim.wo[win].wrap           = false
+    vim.wo[win].cursorline     = false
+  end
+
+  -- Color scheme: section headers (━━━) in accent blue, keys in purple, logo dimmed
+  local ns = vim.api.nvim_create_namespace("tdl_cheatsheet")
+  vim.api.nvim_set_hl(0, "CsHeader",  { fg = "#6181C6", bold = true })
+  vim.api.nvim_set_hl(0, "CsKey",     { fg = "#b57bee", bold = true })
+  vim.api.nvim_set_hl(0, "CsLogo",    { fg = "#4a4a6a" })
+  vim.api.nvim_set_hl(0, "CsCaption", { fg = "#555577", italic = true })
+  vim.api.nvim_set_hl(0, "CsDim",     { fg = "#444466" })
+
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for i, line in ipairs(lines) do
+    local lnum = i - 1
+    -- Logo block (lines containing ██ or ╗ etc.)
+    if line:match("[█╗╝╔╚║═╠╣╦╩╬]") then
+      vim.api.nvim_buf_add_highlight(buf, ns, "CsLogo", lnum, 0, -1)
+    -- Section dividers (━━━)
+    elseif line:match("^%s*━") then
+      vim.api.nvim_buf_add_highlight(buf, ns, "CsHeader", lnum, 0, -1)
+    -- Caption lines (── ... ──)
+    elseif line:match("──") then
+      vim.api.nvim_buf_add_highlight(buf, ns, "CsCaption", lnum, 0, -1)
+    -- Tagline under logo
+    elseif line:match("terminal IDE") then
+      vim.api.nvim_buf_add_highlight(buf, ns, "CsDim", lnum, 0, -1)
+    else
+      -- Highlight keybind tokens: <...> and bare letter combos like gd, gr, J/K
+      local col = 0
+      for pre, key, post in line:gmatch("()(<[^>]+>)()") do
+        vim.api.nvim_buf_add_highlight(buf, ns, "CsKey", lnum, pre - 1, post - 1)
+      end
+      -- Also highlight short bare keybinds (gd, gr, K at word boundaries)
+      for pre, key, post in line:gmatch("()%f[%w][gK][dr]?%f[%W]()") do
+        vim.api.nvim_buf_add_highlight(buf, ns, "CsKey", lnum, pre - 1, post - 1)
+      end
+      _ = col
+    end
+  end
+  -- Dismiss keybind: q closes the cheatsheet buffer
+  vim.keymap.set("n", "q", function()
+    if vim.api.nvim_buf_is_valid(buf) then
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end
+  end, { buffer = buf, desc = "Close cheatsheet", silent = true })
+end
+
+local function _cs_open()
+  -- Reuse existing buffer if it's still alive
+  if _cs_buf and vim.api.nvim_buf_is_valid(_cs_buf) then
+    local win = vim.fn.bufwinid(_cs_buf)
+    if win ~= -1 then
+      vim.api.nvim_set_current_win(win)
+    else
+      vim.cmd("buffer " .. _cs_buf)
+    end
+    return
+  end
+
+  vim.cmd("edit " .. vim.fn.fnameescape(_cs_path))
+  _cs_buf = vim.api.nvim_get_current_buf()
+  _cs_apply_style(_cs_buf)
+end
+
+-- Auto-dismiss: when a real file buffer is entered, wipe the cheatsheet
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function(ev)
+    if _cs_buf == nil or not vim.api.nvim_buf_is_valid(_cs_buf) then return end
+    local entering = ev.buf
+    if entering == _cs_buf then return end
+    -- Only dismiss for real file buffers (not terminals, sidebars, etc.)
+    local bt = vim.bo[entering].buftype
+    local name = vim.api.nvim_buf_get_name(entering)
+    if bt == "" and name ~= "" and vim.fn.filereadable(name) == 1 then
+      local buf = _cs_buf
+      _cs_buf = nil
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_delete(buf, { force = true })
+        end
+      end)
+    end
+  end,
+})
+
+-- <leader>? — reopen cheatsheet any time
+vim.keymap.set("n", "<leader>?", _cs_open, { desc = "Open cheatsheet" })
+
+-- ============================================================
 -- BOOTSTRAP LAZY.NVIM
 -- ============================================================
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
@@ -287,6 +405,10 @@ require("lazy").setup({
         -- Outside tmux: use nvim-tree directly
         require("nvim-tree.api").tree.toggle({ focus = false, find_file = true })
       end
+          end
+          -- Open cheatsheet when launched with no file (empty buffer = fresh tdl session)
+          if is_empty and not vim.o.diff then
+            vim.schedule(_cs_open)
           end
         end,
       })

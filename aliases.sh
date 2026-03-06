@@ -32,7 +32,7 @@ tdl() {
   tmux split-window -h -p 29 -t "$session:0.$main_pane"
   tmux send-keys -t "$session:0.$((main_pane + 1))" "opencode $launch_dir" Enter
   tmux select-pane -t "$session:0.$main_pane"
-  tmux send-keys -t "$session:0.$main_pane" "cd $launch_dir && nvim ." Enter
+  tmux send-keys -t "$session:0.$main_pane" "cd $launch_dir && nvim" Enter
   tmux attach -t "$session"
 }
 

@@ -1,36 +1,40 @@
 # tdl
 
-An open-source, terminal-native AI IDE. VS Code's layout and Cursor's AI workflow — built on tmux + Neovim + Opencode. No Electron. No vendor lock-in. Runs over SSH.
+A terminal-native AI development environment built on tmux, Neovim, and [Opencode](https://opencode.ai). It reconstructs the familiar three-pane IDE layout — persistent file browser, tabbed editor, AI assistant — entirely inside a terminal session.
+
+No Electron. No GUI. Runs over SSH.
 
 ## Layout
 
 ```
 ┌──────────┬──────────────────────────────┬───────────────┐
-│ file     │         nvim editor          │   opencode    │
-│ sidebar  │                              │               │
-│ (21 cols)│         + shell              │   (~29% wide) │
+│  file    │         nvim editor          │   opencode    │
+│ sidebar  │                              │   AI agent    │
+│          │         + shell              │               │
 └──────────┴──────────────────────────────┴───────────────┘
 ```
 
-- **Left**: persistent treemux sidebar — isolated `NVIM_APPNAME=nvim-treemux` instance, always visible, tracks `cd` globally
-- **Middle**: main nvim editor + terminal below
-- **Right**: Opencode AI assistant, persistent tmux pane, survives editor restarts
+- **Left** — Persistent file sidebar. A separate, isolated `nvim` instance (`NVIM_APPNAME=nvim-treemux`) that stays visible at all times and tracks directory changes globally across `cd` calls.
+- **Center** — Main Neovim editor with a shell below. Full LSP, Treesitter, Telescope, bufferline tabs.
+- **Right** — Opencode AI assistant in a dedicated tmux pane. Persists across editor restarts and session reattachments.
 
-## Why tdl
+## What makes this different
 
-| | VS Code / Cursor | LazyVim | tdl |
-|---|---|---|---|
-| Terminal-native | No | Yes | Yes |
-| Persistent AI pane | Cursor only (proprietary) | No | Yes (Opencode, MIT) |
-| Persistent sidebar | Yes | Toggle only | Yes |
-| Cross-project bookmarks | Yes | No (Harpoon is project-scoped) | Yes |
-| Workspace session state | Yes | No | Yes |
-| SSH-friendly | No | Yes | Yes |
-| Single `curl` install | No | No | Yes |
+Most terminal Neovim setups are *editor configurations* — they configure Neovim itself. `tdl` is a *workspace environment* that orchestrates multiple processes within a tmux session.
+
+**Persistent sidebar, not a toggle.** The file browser is a completely separate Neovim instance with its own isolated config. It never disappears on focus loss, survives editor restarts, and communicates with the main editor over a Unix socket.
+
+**AI as a first-class pane.** The AI assistant lives in a tmux pane alongside the editor, not as a plugin inside Neovim. This means it can read terminal output, persists context across file switches, and doesn't fight Neovim for screen real estate.
+
+**Workspace session state.** `ensure_treemux.sh` is an idempotent session manager — it re-creates the full three-pane layout if it doesn't exist, and attaches to the existing session if it does. The workspace survives reattachments, `cd` calls, and machine restarts.
+
+**Cross-project bookmarks.** A plain-text global bookmark file (`~/.local/share/nvim/global_bookmarks`) that spans all directories and projects, unlike project-scoped mark tools.
+
+**Provider-agnostic AI.** Opencode is MIT-licensed and works with any LLM backend — including free tiers — so there's no vendor dependency baked into the workflow.
+
+**SSH-native.** Because everything runs in tmux, the full IDE environment is available over any SSH connection without forwarding ports or installing desktop software.
 
 ## Install
-
-One-liner:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash
@@ -42,24 +46,23 @@ Clones to `~/.local/share/tdl` by default. Override with `TDL_DIR`:
 TDL_DIR=~/tdl curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash
 ```
 
-`install.sh` auto-injects the correct paths into `~/.config/.aliases` and
-`~/.config/tmux/.tmux.conf`. Re-running is safe — idempotent.
+Re-running is safe — the installer is idempotent.
 
 ## Usage
 
 ```bash
-tdl           # create new session in current directory
-tdl myproject # attach to existing session named "myproject"
+tdl              # open current directory in a new session
+tdl myproject    # attach to an existing session named "myproject"
 ```
 
-Session names are auto-generated as `nvim@<dirname>`.
+Sessions are named `nvim@<dirname>` automatically.
 
 ## Requirements
 
 - tmux ≥ 3.2
 - nvim ≥ 0.9
 - python-pynvim (`sudo pacman -S python-pynvim` on Arch/CachyOS)
-- opencode (`npm i -g opencode` or your preferred install)
+- opencode (`npm i -g opencode` or see [opencode.ai](https://opencode.ai))
 - A Nerd Font for icons
 
 ## What install.sh does
@@ -69,15 +72,19 @@ Session names are auto-generated as `nvim@<dirname>`.
 3. Installs the `kiyoon/treemux` plugin via TPM headless install
 4. Creates symlinks:
    - `~/.config/nvim` → `tdl/nvim/` (main nvim config)
-   - `~/.config/nvim-treemux/` files → `tdl/nvim-treemux/`
+   - `~/.config/nvim-treemux/` → `tdl/nvim-treemux/` (isolated sidebar config)
    - `~/.config/tmux/ensure_treemux.sh` → `tdl/ensure_treemux.sh`
-5. Bootstraps nvim-treemux and main nvim plugins headlessly via `lazy sync`
-6. Injects `source` lines into `~/.config/.aliases` and `~/.config/tmux/.tmux.conf` (idempotent)
+5. Bootstraps both nvim configs headlessly via `lazy sync`
+6. Injects `source` lines into `~/.config/.aliases` and `~/.config/tmux/.tmux.conf`
 
-## Updating treemux plugin
+## Updating
 
 After `tpm update`, the custom `watch_and_update.sh` symlink gets overwritten. Re-run:
 
 ```bash
 bash install.sh
 ```
+
+## License
+
+MIT

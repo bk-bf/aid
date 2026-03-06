@@ -76,12 +76,25 @@ After a `tpm update` of treemux, re-run `install.sh` to restore the symlink — 
 
 `~/.config/.aliases` sources this repo's `aliases.sh`:
 ```bash
-source ~/Documents/Projects/special_projects/tdl/aliases.sh
+source ~/.local/share/tdl/aliases.sh
 ```
 
 `~/.config/tmux/.tmux.conf` sources this repo's `tmux.conf`:
 ```bash
-source-file ~/Documents/Projects/special_projects/tdl/tmux.conf
+source-file ~/.local/share/tdl/tmux.conf
 ```
 
 The symlinks inside `~/.config/` that point into this repo are hidden via `.git/info/exclude` in the dotfiles repo (not `.gitignore`) so they don't appear as untracked files.
+
+## Repo structure (bare + worktrees)
+
+This repo is cloned bare. Two worktrees are checked out:
+
+| Worktree | Branch | Purpose |
+|---|---|---|
+| `tdl/main/` | `master` | All code — edit here |
+| `tdl/docs/` | `dev-docs` | Private architecture/roadmap/bugs/decisions docs |
+
+The `dev-docs` branch is an orphan — **never merge it into master or any code branch**.
+
+Private docs live in `tdl/docs/`: `ARCHITECTURE.md`, `ROADMAP.md`, `BUGS.md`, `DECISIONS.md`.

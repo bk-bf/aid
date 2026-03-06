@@ -53,9 +53,20 @@ ln -sf "$TDL/nvim-treemux/watch_and_update.sh" \
 ln -sf "$TDL/ensure_treemux.sh" "$HOME/.config/tmux/ensure_treemux.sh"
 
 # ── 5. nvim-treemux plugin bootstrap (headless lazy sync) ────────────────────
+_spin() {
+  local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0 msg="$1"
+  while kill -0 "$2" 2>/dev/null; do
+    printf "\r  \033[38;5;208m%s\033[0m  %s" "${frames:$((i%10)):1}" "$msg"
+    i=$((i+1)); sleep 0.08
+  done
+  printf "\r\033[2K"
+}
+
 echo "==> Bootstrapping nvim-treemux plugins (lazy sync)..."
-NVIM_APPNAME=nvim-treemux nvim --headless "+Lazy! sync" +qa 2>/dev/null || \
-  echo "  (headless sync exited non-zero — likely fine on first run, plugins still installed)"
+NVIM_APPNAME=nvim-treemux nvim --headless "+Lazy! sync" +qa 2>/dev/null &
+_nvim_pid=$!
+_spin "syncing nvim-treemux plugins…" $_nvim_pid
+wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run, plugins still installed)"
 
 # ── 6. Shell integration — inject source lines if not already present ────────
 echo "==> Wiring shell integration..."

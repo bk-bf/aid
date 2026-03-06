@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO="https://github.com/bk-bf/tdl.git"
-DEFAULT_DEST="$HOME/Documents/Projects/special_projects/tdl"
+DEFAULT_DEST="$HOME/.local/share/tdl"
 DEST="${TDL_DIR:-$DEFAULT_DEST}"
 
 if [[ -d "$DEST/.git" ]]; then

@@ -24,7 +24,7 @@ One-liner:
 curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash
 ```
 
-Clones to `~/Documents/Projects/special_projects/tdl` by default. Override with `TDL_DIR`:
+Clones to `~/.local/share/tdl` by default. Override with `TDL_DIR`:
 
 ```bash
 TDL_DIR=~/tdl curl -fsSL https://raw.githubusercontent.com/bk-bf/tdl/master/boot.sh | bash

@@ -18,25 +18,16 @@ A portable terminal IDE layout: **treemux sidebar** | **nvim** | **opencode**, a
 
 ## Install
 
+Clone anywhere, then run `install.sh`:
+
 ```bash
-git clone https://github.com/bk-bf/tdl.git ~/Documents/Projects/special_projects/tdl
-cd ~/Documents/Projects/special_projects/tdl
+git clone https://github.com/bk-bf/tdl.git
+cd tdl
 bash install.sh
 ```
 
-Then add to your shell config (`~/.bashrc` / `~/.zshrc`):
-
-```bash
-source ~/Documents/Projects/special_projects/tdl/aliases.sh
-```
-
-And to `~/.config/tmux/.tmux.conf` (or your tmux config):
-
-```bash
-source-file ~/Documents/Projects/special_projects/tdl/tmux.conf
-```
-
-Reload tmux: `tmux source-file ~/.config/tmux/.tmux.conf`
+`install.sh` auto-detects its own location and injects the correct paths into
+`~/.config/.aliases` and `~/.config/tmux/.tmux.conf`. No hardcoded paths.
 
 ## Usage
 

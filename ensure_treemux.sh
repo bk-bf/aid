@@ -22,8 +22,16 @@ ARGS=$(tmux -L tdl show-option -gqv '@treemux-key-Tab')
 PANE_ID="${TMUX_PANE:-$(tmux -L tdl display-message -p '#{pane_id}')}"
 
 if [ -z "$ARGS" ]; then
-    # sidebar.tmux hasn't run yet (race at session start); bail out silently
-    exit 0
+    # sidebar.tmux may not have finished yet (race at session start).
+    # Retry for up to 3 seconds before giving up.
+    for _i in 1 2 3 4 5 6; do
+        sleep 0.5
+        ARGS=$(tmux -L tdl show-option -gqv '@treemux-key-Tab')
+        [ -n "$ARGS" ] && break
+    done
+    if [ -z "$ARGS" ]; then
+        exit 0
+    fi
 fi
 
 # Check if sidebar is already registered and the pane actually exists

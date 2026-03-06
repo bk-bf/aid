@@ -40,6 +40,9 @@ tdl() {
   # IDE layout sizes — all pane geometry owned here, not scattered in tmux.conf
   # sidebar=21, right (opencode)=28% of total width; editor gets the remainder
   tmux -L tdl set-option -t "$session" @treemux-tree-width 21
+  # Wait for sidebar.tmux to finish setting @treemux-key-Tab, then open treemux.
+  # The session-created hook also calls ensure_treemux.sh but may race; this is
+  # the authoritative call that runs after plugins have had time to initialise.
   sleep 1.5
   local main_pane
   main_pane=$(tmux -L tdl list-panes -t "$session" -F "#{pane_index} #{pane_width}" \
@@ -47,6 +50,10 @@ tdl() {
   tmux -L tdl split-window -h -p 29 -t "$session:0.$main_pane"
   tmux -L tdl send-keys -t "$session:0.$((main_pane + 1))" "opencode $launch_dir" Enter
   tmux -L tdl select-pane -t "$session:0.$main_pane"
+  # Open treemux sidebar: send ensure_treemux.sh to the main pane so it runs
+  # inside the session with correct $TMUX context (required by toggle.sh).
+  tmux -L tdl send-keys -t "$session:0.$main_pane" \
+    "$_TDL_DIR/ensure_treemux.sh" Enter
   tmux -L tdl send-keys -t "$session:0.$main_pane" \
     "cd $launch_dir && NVIM_APPNAME=nvim-tdl nvim" Enter
   tmux -L tdl attach -t "$session"

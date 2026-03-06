@@ -21,7 +21,7 @@ local sync = require("sync")
 -- Opens nvim/cheatsheet.md as a styled read-only welcome buffer.
 -- Auto-dismissed when any real file is opened. Re-open: <leader>?
 
-local _cs_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h") .. "/cheatsheet.md"
+local _cs_path = vim.fn.stdpath("config") .. "/cheatsheet.md"
 local _cs_buf = nil  -- track the cheatsheet buffer number
 
 local function _cs_is_cheatsheet(buf)

@@ -60,8 +60,8 @@
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━   SPELL   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  <leader>sS       toggle spell (en+de)    <leader>se       English only
-  <leader>sd       German only             <leader>sn       spell off
+  <leader>sS       toggle spell (en)       <leader>se       English only
+  <leader>sn       spell off
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  MARKDOWN  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

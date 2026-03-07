@@ -9,6 +9,62 @@ vim.g.loaded_netrw       = 1
 vim.g.loaded_netrwPlugin = 1
 
 -- ============================================================
+-- OPTIONS
+-- ============================================================
+-- Set early — before plugins, autocmds, and cheatsheet code — so that
+-- vim.o.* reflects the intended globals when any autocmd reads them.
+
+-- Line numbers
+vim.opt.number = true
+vim.opt.relativenumber = false
+
+-- Editing feel
+vim.opt.tabstop = 2
+vim.opt.shiftwidth = 2
+vim.opt.expandtab = true
+vim.opt.smartindent = true
+vim.opt.wrap = false
+vim.opt.scrolloff = 8
+vim.opt.signcolumn = "yes"
+vim.opt.cursorline = false
+
+-- Search
+vim.opt.ignorecase = true
+vim.opt.smartcase = true
+vim.opt.hlsearch = false
+vim.opt.incsearch = true
+
+-- Per-project config: auto-load .nvim.lua from project root (trust prompt on first open)
+vim.opt.exrc = true
+vim.opt.secure = true
+
+-- System clipboard
+vim.opt.clipboard = "unnamedplus"
+
+-- Splits
+vim.opt.splitright = true
+vim.opt.splitbelow = true
+
+-- Diff options
+vim.opt.diffopt = {
+  "internal",
+  "filler",
+  "closeoff",
+  "linematch:60",
+  "algorithm:histogram",
+}
+
+-- Auto-reload files when changed on disk
+vim.opt.updatetime = 500
+vim.opt.autoread = true
+
+-- Status line: hidden (tmux bar handles global status across panes)
+vim.opt.laststatus = 0
+
+-- Tab bar: always visible (bufferline renders even with a single buffer)
+vim.opt.showtabline = 2
+
+-- ============================================================
 -- GIT-SYNC COORDINATOR
 -- ============================================================
 -- Central module that refreshes all git-aware components after an external
@@ -78,7 +134,7 @@ local function _cs_apply_style(buf)
         vim.api.nvim_buf_add_highlight(buf, ns, "CsKey", lnum, pre - 1, post - 1)
       end
       -- Also highlight short bare keybinds (gd, gr, K at word boundaries)
-      for pre, key, post in line:gmatch("()%f[%w][gK][dr]?%f[%W]()") do
+      for pre, post in line:gmatch("()%f[%w][gK][dr]?%f[%W]()") do
         vim.api.nvim_buf_add_highlight(buf, ns, "CsKey", lnum, pre - 1, post - 1)
       end
       _ = col
@@ -110,6 +166,7 @@ local function _cs_open()
 end
 
 -- Auto-dismiss: when a real file buffer is entered, wipe the cheatsheet
+-- and restore the window-local options that _cs_apply_style overrode.
 vim.api.nvim_create_autocmd("BufEnter", {
   callback = function(ev)
     if _cs_buf == nil or not vim.api.nvim_buf_is_valid(_cs_buf) then return end
@@ -121,11 +178,45 @@ vim.api.nvim_create_autocmd("BufEnter", {
     if bt == "" and name ~= "" and vim.fn.filereadable(name) == 1 then
       local buf = _cs_buf
       _cs_buf = nil
+      -- Clear all window-local overrides set by _cs_apply_style so the
+      -- global vim.opt values take effect. The trailing < means "inherit
+      -- from global" — it works even when vim.wo assignment would not.
+      vim.cmd("setlocal number relativenumber& signcolumn=yes foldcolumn& statuscolumn& wrap& cursorline&")
       vim.schedule(function()
         if vim.api.nvim_buf_is_valid(buf) then
           vim.api.nvim_buf_delete(buf, { force = true })
         end
       end)
+    end
+  end,
+})
+
+-- Belt-and-suspenders: whenever any normal file buffer is displayed in a window,
+-- ensure the gutter options match global settings. This catches cases where the
+-- BufEnter dismiss autocmd fires too early or the filereadable() check fails.
+vim.api.nvim_create_autocmd("BufWinEnter", {
+  callback = function(ev)
+    local bt   = vim.bo[ev.buf].buftype
+    local name = vim.api.nvim_buf_get_name(ev.buf)
+    -- Only act on normal file buffers; skip cheatsheet, terminals, sidebars, etc.
+    if bt ~= "" then return end
+    if name == "" then return end
+    if _cs_buf and ev.buf == _cs_buf then return end
+    vim.cmd("setlocal number relativenumber& signcolumn=yes foldcolumn& statuscolumn& wrap& cursorline&")
+  end,
+})
+
+-- Auto-restore: when we land on an empty unnamed buffer (e.g. after closing
+-- the last real file with <leader>q), reopen the cheatsheet instead.
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function(ev)
+    local bt   = vim.bo[ev.buf].buftype
+    local name = vim.api.nvim_buf_get_name(ev.buf)
+    -- Skip if this is already the cheatsheet buffer
+    if _cs_buf and ev.buf == _cs_buf then return end
+    -- Only act on a plain empty unnamed buffer
+    if bt == "" and name == "" then
+      vim.schedule(_cs_open)
     end
   end,
 })
@@ -298,13 +389,13 @@ vim.keymap.set("n", "<leader>8", vim.diagnostic.goto_prev, { desc = "Prev diagno
 vim.keymap.set("n", "<leader>9", vim.diagnostic.open_float, { desc = "Show diagnostic" })
 
 -- Spell
--- <leader>sS — toggle spell (en+de) | <leader>se — English | <leader>sd — German | <leader>sn — off
+-- <leader>sS — toggle spell (en) | <leader>se — English | <leader>sd — German | <leader>sn — off
 vim.keymap.set("n", "<leader>sS", function()
   local on = not vim.opt_local.spell:get()
   vim.opt_local.spell = on
-  vim.opt_local.spelllang = "en,de"
-  vim.notify("Spell: " .. (on and "on (en, de)" or "off"))
-end, { desc = "Toggle spell (en+de)" })
+  vim.opt_local.spelllang = "en"
+  vim.notify("Spell: " .. (on and "on (en)" or "off"))
+end, { desc = "Toggle spell (en)" })
 vim.keymap.set("n", "<leader>se", function()
   vim.opt_local.spell = true
   vim.opt_local.spelllang = "en"
@@ -369,6 +460,7 @@ require("lazy").setup({
   -- File tree (VS Code-style sidebar)
   {
      "nvim-tree/nvim-tree.lua",
+    event = "VimEnter",
     dependencies = { "nvim-tree/nvim-web-devicons" },
     opts = {
       view = { width = 30 },
@@ -410,24 +502,6 @@ require("lazy").setup({
         map("<leader>bb", "Bookmark: open", _bm_open_picker)
       end
       require("nvim-tree").setup(opts)
-      -- Auto-open on start for real files and empty buffers (skip diffs/special bufs)
-      vim.api.nvim_create_autocmd("VimEnter", {
-        callback = function(data)
-          local is_file = vim.fn.filereadable(data.file) == 1
-          local is_empty = data.file == "" and vim.bo[data.buf].buftype == ""
-          if (is_file or is_empty) and not vim.o.diff then
-            -- Outside tmux: use nvim-tree directly (in tmux, treemux sidebar is
-            -- opened by tdl.sh via run-shell before nvim starts)
-            if not vim.env.TMUX or vim.env.TMUX == "" then
-              require("nvim-tree.api").tree.toggle({ focus = false, find_file = true })
-            end
-          end
-          -- Open cheatsheet when launched with no file (empty buffer = fresh tdl session)
-          if is_empty and not vim.o.diff then
-            vim.schedule(_cs_open)
-          end
-        end,
-      })
     end,
   },
 
@@ -441,6 +515,7 @@ require("lazy").setup({
         delete = { text = "▎" },
       },
       sign_priority = 6,
+      numhl = true,
       linehl = false, -- responsible for line highlighting --
       on_attach = function(bufnr)
         local gs = package.loaded.gitsigns
@@ -461,6 +536,7 @@ require("lazy").setup({
   -- File tabs (like VS Code)
   {
     "akinsho/bufferline.nvim",
+    event = "VimEnter",
     dependencies = { "nvim-tree/nvim-web-devicons" },
     opts = {
       options = {
@@ -509,6 +585,13 @@ require("lazy").setup({
           vim.o.showtabline = vim.o.showtabline == 2 and 1 or 2
         end, desc = "Toggle tab bar" },
     },
+    config = function(_, opts)
+      require("bufferline").setup(opts)
+      -- Force a tabline redraw so bufferline renders immediately on startup
+      -- without requiring a keypress (Tab) to trigger the first render.
+      -- defer_fn gives the UI time to fully initialise before redrawing.
+      vim.defer_fn(function() vim.cmd("redrawtabline") end, 50)
+    end,
   },
 
   -- Fuzzy finder
@@ -725,59 +808,7 @@ require("lazy").setup({
 })
 
 
--- ============================================================
--- OPTIONS
--- ============================================================
 
--- Line numbers
-vim.opt.number = true
-vim.opt.relativenumber = false
-
--- Editing feel
-vim.opt.tabstop = 2
-vim.opt.shiftwidth = 2
-vim.opt.expandtab = true
-vim.opt.smartindent = true
-vim.opt.wrap = false
-vim.opt.scrolloff = 8
-vim.opt.signcolumn = "yes"
-vim.opt.cursorline = false
-
--- Search
-vim.opt.ignorecase = true
-vim.opt.smartcase = true
-vim.opt.hlsearch = false
-vim.opt.incsearch = true
-
--- Per-project config: auto-load .nvim.lua from project root (trust prompt on first open)
-vim.opt.exrc = true
-vim.opt.secure = true
-
--- System clipboard
-vim.opt.clipboard = "unnamedplus"
-
--- Splits
-vim.opt.splitright = true
-vim.opt.splitbelow = true
-
--- Diff options
-vim.opt.diffopt = {
-  "internal",
-  "filler",
-  "closeoff",
-  "linematch:60",
-  "algorithm:histogram",
-}
-
--- Auto-reload files when changed on disk
-vim.opt.updatetime = 500
-vim.opt.autoread = true
-
--- Status line: hidden (tmux bar handles global status across panes)
-vim.opt.laststatus = 0
-
--- Tab bar: always visible (bufferline renders even with a single buffer)
-vim.opt.showtabline = 2
 
 -- ============================================================
 -- APPEARANCE
@@ -817,14 +848,13 @@ vim.diagnostic.config({
 -- AUTOCMDS
 -- ============================================================
 
--- Enable word wrap + spell checking (en/de) for prose filetypes
+-- Enable word wrap for prose filetypes (spell off by default, toggle with <leader>sS)
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "markdown", "text", "gitcommit" },
   callback = function()
     vim.opt_local.wrap = true
     vim.opt_local.linebreak = true
-    vim.opt_local.spell = true
-    vim.opt_local.spelllang = "en,de"
+    vim.opt_local.spell = false
   end,
 })
 
@@ -848,4 +878,24 @@ vim.api.nvim_create_autocmd("DirChanged", {
   callback = function() require("tdlignore").reset() end,
 })
 
+-- On startup: open nvim-tree (outside tmux only) and show cheatsheet on empty buffer.
+-- This autocmd lives here (not inside nvim-tree's config) so it is registered
+-- before VimEnter fires regardless of when nvim-tree's lazy load triggers.
+vim.api.nvim_create_autocmd("VimEnter", {
+  callback = function(data)
+    local is_file  = vim.fn.filereadable(data.file) == 1
+    local is_empty = data.file == "" and vim.bo[data.buf].buftype == ""
+    if (is_file or is_empty) and not vim.o.diff then
+      -- Outside tmux: use nvim-tree directly (in tmux, treemux sidebar is
+      -- opened by tdl.sh via run-shell before nvim starts)
+      if not vim.env.TMUX or vim.env.TMUX == "" then
+        require("nvim-tree.api").tree.toggle({ focus = false, find_file = true })
+      end
+    end
+    -- Open cheatsheet when launched with no file (empty buffer = fresh/restarted tdl session)
+    if is_empty and not vim.o.diff then
+      vim.schedule(_cs_open)
+    end
+  end,
+})
 

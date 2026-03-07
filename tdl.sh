@@ -8,11 +8,47 @@
 set -euo pipefail
 
 # Always resolves correctly because this file is executed, not sourced.
-TDL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TDL_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 
-if [[ -n "${1:-}" ]]; then
+# ── Session routing ──────────────────────────────────────────────────────────
+# tdl <name>   → attach to that session directly
+# tdl new      → skip session list, always create a new session
+# tdl          → attach to the only existing session;
+#                if multiple exist, print a list and prompt;
+#                if none exist, create a new one (falls through below)
+
+if [[ "${1:-}" == "ls" ]]; then
+  tmux -L tdl list-sessions 2>/dev/null || echo "no tdl sessions"
+  exit
+elif [[ "${1:-}" == "new" ]]; then
+  shift  # drop "new", fall through to create path
+elif [[ -n "${1:-}" ]]; then
   tmux -L tdl attach -t "$1"
   exit
+else
+  # No argument — check for existing sessions
+  mapfile -t _sessions < <(tmux -L tdl list-sessions -F "#{session_name}" 2>/dev/null)
+  if [[ ${#_sessions[@]} -eq 1 ]]; then
+    tmux -L tdl attach -t "${_sessions[0]}"
+    exit
+  elif [[ ${#_sessions[@]} -gt 1 ]]; then
+    echo "tdl sessions:"
+    for i in "${!_sessions[@]}"; do
+      printf "  [%d] %s\n" "$((i+1))" "${_sessions[$i]}"
+    done
+    printf "  [n] new session in %s\n" "$PWD"
+    printf "attach to [1-%d / n]: " "${#_sessions[@]}"
+    read -r _choice
+    if [[ "$_choice" == "n" || "$_choice" == "N" ]]; then
+      : # fall through to create path
+    elif [[ "$_choice" =~ ^[0-9]+$ ]] && (( _choice >= 1 && _choice <= ${#_sessions[@]} )); then
+      tmux -L tdl attach -t "${_sessions[$((_choice-1))]}"
+      exit
+    else
+      echo "invalid choice — creating new session"
+    fi
+  fi
+  # zero sessions or user chose 'n': fall through to create
 fi
 
 # Capture launch dir before tmux changes context
@@ -50,30 +86,53 @@ export TDL_IGNORE
 tmux -L tdl -f "$TDL_DIR/tmux.conf" new-session -d -s "$session" \
   -x "$(tput cols)" -y "$(tput lines)"
 
-# Export TDL_DIR and TDL_IGNORE into the server environment so all panes inherit them
+# Export TDL_DIR, TDL_IGNORE, and OPENCODE_CONFIG_DIR into the server environment
+# so all panes inherit them. OPENCODE_CONFIG_DIR isolates opencode to tdl's own
+# config dir (commands/, package.json) instead of ~/.config/opencode/.
 tmux -L tdl set-environment -g TDL_DIR "$TDL_DIR"
 tmux -L tdl set-environment -g TDL_IGNORE "$TDL_IGNORE"
+tmux -L tdl set-environment -g OPENCODE_CONFIG_DIR "$TDL_DIR/opencode"
+# NVIM_APPNAME in the server environment means every pane shell inherits it —
+# no dependency on the send-keys command being delivered intact.
+tmux -L tdl set-environment -g NVIM_APPNAME "nvim-tdl"
+# TDL_NVIM_SOCKET must be set before ensure_treemux.sh runs so the sidebar nvim
+# inherits it at startup and sets g:nvim_tree_remote_socket_path correctly.
+nvim_socket="/tmp/tdl-nvim-${session}.sock"
+tmux -L tdl set-environment -g TDL_NVIM_SOCKET "$nvim_socket"
 
 # IDE layout sizes — all pane geometry owned here, not scattered in tmux.conf
-# sidebar=21, right (opencode)=28% of total width; editor gets the remainder
-tmux -L tdl set-option -t "$session" @treemux-tree-width 21
+# sidebar=21 cols set in tmux.conf (must be before sidebar.tmux runs);
+# opencode=29% of total width; editor gets the remainder.
 
 # Wait for sidebar.tmux to finish setting @treemux-key-Tab
 sleep 1.5
 
-main_pane=$(tmux -L tdl list-panes -t "$session" -F "#{pane_index} #{pane_width}" \
+# Find the initial (only) pane and capture its stable ID before any splits.
+editor_pane_id=$(tmux -L tdl list-panes -t "$session" -F "#{pane_id}" | head -1)
+
+# Split right: opencode occupies 29% of width. Capture its ID immediately.
+tmux -L tdl split-window -h -p 29 -t "$editor_pane_id"
+opencode_pane_id=$(tmux -L tdl list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
   | sort -k2 -n | tail -1 | cut -d' ' -f1)
 
-tmux -L tdl split-window -h -p 29 -t "$session:0.$main_pane"
-tmux -L tdl send-keys -t "$session:0.$((main_pane + 1))" "opencode $launch_dir" Enter
-tmux -L tdl select-pane -t "$session:0.$main_pane"
+tmux -L tdl send-keys -t "$opencode_pane_id" \
+  "OPENCODE_CONFIG_DIR=$(printf '%q' "$TDL_DIR/opencode") opencode $(printf '%q' "$launch_dir")" Enter
+tmux -L tdl select-pane -t "$editor_pane_id"
 
 # Open treemux sidebar: run-shell -t executes inside the tdl server with $TMUX
 # and $TMUX_PANE set, which toggle.sh's bare tmux calls require.
-main_pane_id=$(tmux -L tdl list-panes -t "$session:0.$main_pane" -F "#{pane_id}")
-tmux -L tdl run-shell -t "$main_pane_id" "$TDL_DIR/ensure_treemux.sh"
+# Pane IDs are stable — treemux inserting the sidebar won't shift them.
+tmux -L tdl run-shell -t "$editor_pane_id" "$TDL_DIR/ensure_treemux.sh"
 
-tmux -L tdl send-keys -t "$session:0.$main_pane" \
-  "cd $(printf '%q' "$launch_dir") && NVIM_APPNAME=nvim-tdl nvim" Enter
+# Send nvim to the editor pane by stable ID — safe even after treemux adds the sidebar.
+# NVIM_APPNAME inline: belt-and-suspenders in case the shell was spawned before
+# set-environment ran (set-environment only affects shells started after the call).
+# --listen: required so treemux can locate and reuse this nvim instance via its socket.
+#
+# The editor pane runs nvim permanently: when the user quits nvim (:q), the loop
+# restarts it immediately on the same socket. The pane is never a bare shell.
+# To kill the session entirely: close the tmux window or run `tdl kill`.
+tmux -L tdl send-keys -t "$editor_pane_id" \
+  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); NVIM_APPNAME=nvim-tdl nvim --listen $(printf '%q' "$nvim_socket"); done" Enter
 
 tmux -L tdl attach -t "$session"

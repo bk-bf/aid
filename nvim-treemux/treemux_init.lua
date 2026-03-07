@@ -2,6 +2,14 @@
 -- plugins will be installed via https instead of ssh.
 vim.env.GIT_CONFIG_GLOBAL = ""
 
+-- Point nvim-tree-remote at the editor nvim's socket.
+-- tdl.sh stores the socket path in the tmux server environment as TDL_NVIM_SOCKET
+-- (e.g. /tmp/tdl-nvim-nvim@myproject.sock) and the editor nvim is launched with
+-- `nvim --listen <that path>`. Setting this global bypasses the auto-detection in
+-- tmux_current_window_nvim_addr.sh, which only works when the socket filename
+-- contains the nvim PID — something a fixed/predictable path won't satisfy.
+vim.g.nvim_tree_remote_socket_path = os.getenv("TDL_NVIM_SOCKET") or ""
+
 -- Remove the white status bar below
 vim.o.laststatus = 0
 
@@ -30,13 +38,17 @@ local function nvim_tree_on_attach(bufnr)
     return { desc = "nvim-tree: " .. desc, buffer = bufnr, noremap = true, silent = true, nowait = true }
   end
 
-  -- nvim_tree_remote checks node.type == "file" and falls back to local open for symlinks (type
-  -- == "link"). Wrap tabnew to force symlinks through the remote path via their absolute_path.
+  -- nvim_tree_remote checks node.type == "file" and falls back to local open for symlinks
+  -- (type == "link"). Wrap tabnew to force symlinks through the remote path via absolute_path.
+  -- The editor pane always runs nvim (tdl.sh uses a restart loop), so the socket at
+  -- TDL_NVIM_SOCKET is always live. The fallback split in nvim_tree_remote is disabled
+  -- (pane = nil) so a dead socket produces a clear error instead of a rogue new pane.
   local function tabnew_follow_symlinks()
     local node = api.tree.get_node_under_cursor()
     if node and (node.type == "file" or node.type == "link") then
       local socket_path = vim.g.nvim_tree_remote_socket_path
       local tmux_opts = nt_remote.tmux_defaults()
+      tmux_opts.pane = nil  -- never create a new split; error if socket unreachable
       require("nvim_tree_remote").remote_nvim_open(socket_path, "tabnew", node.absolute_path, tmux_opts)
     else
       nt_remote.tabnew()

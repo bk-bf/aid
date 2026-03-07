@@ -64,21 +64,21 @@ while tmux -L tdl has-session -t "$session" 2>/dev/null; do
   (( n++ ))
 done
 
-# Parse .tdlignore (walks up from launch_dir) and build TDL_IGNORE=comma,separated,list
+# Parse .aidignore (walks up from launch_dir) and build TDL_IGNORE=comma,separated,list
 TDL_IGNORE=""
-_tdlignore_file=""
+_aidignore_file=""
 _dir="$launch_dir"
 for _i in $(seq 1 20); do
-  if [[ -f "$_dir/.tdlignore" ]]; then
-    _tdlignore_file="$_dir/.tdlignore"
+  if [[ -f "$_dir/.aidignore" ]]; then
+    _aidignore_file="$_dir/.aidignore"
     break
   fi
   _parent="$(dirname "$_dir")"
   [[ "$_parent" == "$_dir" ]] && break
   _dir="$_parent"
 done
-if [[ -n "$_tdlignore_file" ]]; then
-  TDL_IGNORE=$(grep -v '^\s*#' "$_tdlignore_file" | grep -v '^\s*$' | paste -sd ',')
+if [[ -n "$_aidignore_file" ]]; then
+  TDL_IGNORE=$(grep -v '^\s*#' "$_aidignore_file" | grep -v '^\s*$' | paste -sd ',')
 fi
 export TDL_IGNORE
 

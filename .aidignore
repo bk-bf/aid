@@ -1,10 +1,10 @@
-# .tdlignore — hide these from the tdl file tree and file finder
+# .aidignore — hide these from the aid file tree and file finder
 # Used by nvim-tree (filters.custom) and Telescope (file_ignore_patterns).
 # Patterns are matched against the full path, so bare names match anywhere.
 # One pattern per line. Lines starting with # are comments.
 
 # ── Bare git repo internals ──────────────────────────────────────────────────
-# These live at the bare repo root (tdl/) and are git's plumbing — never edit.
+# These live at the bare repo root (aid/) and are git's plumbing — never edit.
 hooks
 info
 logs

@@ -187,7 +187,7 @@ require("lazy").setup({
           side = "left",
         },
         filters = {
-          -- Read TDL_IGNORE (comma-separated, set by aid.sh from .tdlignore).
+          -- Read TDL_IGNORE (comma-separated, set by aid.sh from .aidignore).
           -- Falls back to hiding just .git if not running inside aid.
           custom = (function()
             local t = { ".git" }

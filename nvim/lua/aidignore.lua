@@ -1,16 +1,16 @@
--- tdlignore.lua — reads the TDL_IGNORE env var (set by tdl.sh at launch) and
+-- aidignore.lua — reads the TDL_IGNORE env var (set by aid.sh at launch) and
 -- returns pattern tables for nvim-tree and Telescope.
 --
 -- TDL_IGNORE is a comma-separated list of plain name patterns, e.g.:
 --   hooks,info,logs,objects,refs,worktrees,packed-refs,config,description,HEAD
 --
--- tdl.sh parses .tdlignore once at session start and exports TDL_IGNORE into
+-- aid.sh parses .aidignore once at session start and exports TDL_IGNORE into
 -- the tmux server environment, so every pane (main nvim + sidebar) inherits it
 -- without any file I/O or path walking at nvim startup.
 --
 -- Usage:
---   local tdlignore = require("tdlignore")
---   local pats = tdlignore.patterns()
+--   local aidignore = require("aidignore")
+--   local pats = aidignore.patterns()
 --   -- pats.raw       — plain strings for nvim-tree filters.custom
 --   -- pats.telescope — Lua-pattern strings for Telescope file_ignore_patterns
 

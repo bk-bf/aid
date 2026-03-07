@@ -472,9 +472,9 @@ require("lazy").setup({
       { "<leader>tf", "<cmd>NvimTreeFindFile<cr>", desc = "Reveal file in tree" },
     },
     config = function(_, opts)
-      -- Populate filters.custom from .tdlignore before setup
-      local tdlignore = require("tdlignore")
-      local ignore_pats = tdlignore.patterns()
+      -- Populate filters.custom from .aidignore before setup
+      local aidignore = require("aidignore")
+      local ignore_pats = aidignore.patterns()
       opts.filters = opts.filters or {}
       opts.filters.custom = ignore_pats.raw
 
@@ -605,10 +605,10 @@ require("lazy").setup({
       },
     },
     config = function(_, opts)
-      -- Merge .tdlignore patterns into defaults.file_ignore_patterns
-      local tdlignore = require("tdlignore")
+      -- Merge .aidignore patterns into defaults.file_ignore_patterns
+      local aidignore = require("aidignore")
       local base = { "^%.git[/\\]" }
-      for _, p in ipairs(tdlignore.patterns().telescope) do
+      for _, p in ipairs(aidignore.patterns().telescope) do
         table.insert(base, p)
       end
       opts.defaults = opts.defaults or {}
@@ -871,11 +871,11 @@ vim.api.nvim_create_autocmd("TermClose", {
   callback = function() sync.sync() end,
 })
 
--- Bust tdlignore cache when cwd changes so nvim-tree + Telescope pick up the
--- correct .tdlignore for the new directory.
+-- Bust aidignore cache when cwd changes so nvim-tree + Telescope pick up the
+-- correct .aidignore for the new directory.
 vim.api.nvim_create_autocmd("DirChanged", {
   pattern = "*",
-  callback = function() require("tdlignore").reset() end,
+  callback = function() require("aidignore").reset() end,
 })
 
 -- On startup: open nvim-tree (outside tmux only) and show cheatsheet on empty buffer.

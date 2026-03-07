@@ -1,5 +1,7 @@
 # AID
 
+> **Early beta.** Works well day-to-day, but rough edges exist. Arch/CachyOS only for now. Feedback welcome.
+
 Terminal IDE built on tmux + Neovim + [Opencode](https://opencode.ai). Three persistent panes — file browser, editor, AI assistant — that survive reboots, SSH drops, and branch switches.
 
 ![aid screenshot](screenshot-20260307-041411.png)
@@ -18,7 +20,8 @@ Re-running is safe — idempotent.
 
 ```bash
 aid              # new session in current directory
-aid myproject    # attach to existing session
+aid -a           # attach to a running session (interactive list)
+aid -a myproject # attach directly by name
 ```
 
 Sessions are named `aid@<dirname>` automatically.

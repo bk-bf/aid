@@ -2,12 +2,6 @@
 -- plugins will be installed via https instead of ssh.
 vim.env.GIT_CONFIG_GLOBAL = ""
 
--- Add main nvim/lua to package.path so shared modules (aidignore, etc.) are available.
-local tdl_dir = os.getenv("TDL_DIR") or ""
-if tdl_dir ~= "" then
-  package.path = tdl_dir .. "/nvim/lua/?.lua;" .. package.path
-end
-
 -- Point nvim-tree-remote at the editor nvim's socket.
 -- aid.sh stores the socket path in the tmux server environment as TDL_NVIM_SOCKET
 -- (e.g. /tmp/tdl-nvim-nvim@myproject.sock) and the editor nvim is launched with
@@ -193,14 +187,21 @@ require("lazy").setup({
           side = "left",
         },
         filters = {
-          -- Read patterns from .aidignore on disk (same logic as main nvim).
-          custom = require("aidignore").patterns().raw,
+          -- Read TDL_IGNORE (comma-separated, set by aid.sh from .aidignore).
+          -- Falls back to hiding just .git if not running inside aid.
+          custom = (function()
+            local t = { ".git" }
+            local env = os.getenv("TDL_IGNORE") or ""
+            for entry in env:gmatch("[^,]+") do
+              entry = entry:match("^%s*(.-)%s*$")
+              if entry ~= "" then table.insert(t, entry) end
+            end
+            return t
+          end)(),
           dotfiles = false,
           git_ignored = false,
         },
       })
-      -- Start watching .aidignore for live filter updates.
-      require("aidignore").watch()
     end,
   },
   {

@@ -710,6 +710,7 @@ require("lazy").setup({
 -- ============================================================
 vim.api.nvim_set_hl(0, "Normal", { bg = "none" })
 vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
+vim.api.nvim_set_hl(0, "GitSignsAdd",      { fg = "#50fa7b" })
 vim.api.nvim_set_hl(0, "GitSignsDelete",   { fg = "#ff5555" })
 vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { bg = "#3d1a1a" })
 vim.api.nvim_set_hl(0, "GitSignsChange",   { fg = "#ffaa00" })

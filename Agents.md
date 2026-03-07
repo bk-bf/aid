@@ -15,18 +15,22 @@ aid/                            ← bare git repo root
 ├── main/                       ← master branch worktree (all code lives here)
 │   ├── boot.sh                 # curl bootstrapper — clones repo then runs install.sh
 │   ├── install.sh              # one-shot setup: TPM, treemux, symlinks, headless nvim bootstrap
-│   ├── aliases.sh              # sourced by ~/.config/.aliases — aid() launcher, nvim() wrapper
+│   ├── aid.sh                  # main entry point — symlinked to ~/.local/bin/aid by install.sh
 │   ├── tmux.conf               # loaded via -f on the dedicated tmux server socket
 │   ├── ensure_treemux.sh       # idempotent sidebar opener; symlinked to ~/.config/tmux/ensure_treemux.sh
+│   ├── .aidignore              # patterns hidden from nvim-tree and Telescope (parsed by aid.sh at launch)
 │   ├── nvim/
 │   │   ├── init.lua            # main nvim config (plugins, LSP, keymaps, options, autocmds)
 │   │   ├── cheatsheet.md       # styled welcome buffer — opens on fresh aid launch, <leader>?
 │   │   ├── lazy-lock.json      # plugin lockfile
 │   │   └── lua/
-│   │       └── sync.lua        # central git-sync coordinator (see below)
+│   │       ├── sync.lua        # central git-sync coordinator (see below)
+│   │       └── aidignore.lua   # reads TDL_IGNORE env var, returns patterns for nvim-tree + Telescope
 │   ├── nvim-treemux/
 │   │   ├── treemux_init.lua    # isolated nvim config for sidebar (NVIM_APPNAME=nvim-treemux)
 │   │   └── watch_and_update.sh # custom fork — cd-follows root on any cd, not just exit
+│   ├── opencode/
+│   │   └── commands/           # custom slash commands (commit.md, udoc.md)
 │   ├── README.md
 │   └── Agents.md
 └── docs/                       ← dev-docs branch worktree (orphan, never merge into master)
@@ -40,13 +44,21 @@ aid/                            ← bare git repo root
 
 aid is fully isolated from the user's existing nvim and tmux setup. Nothing is shared.
 
+> **Note on naming**: aid was rebranded from `tdl`. Most internal infrastructure
+> still uses the `tdl` identifier — the tmux socket (`-L tdl`), env vars
+> (`TDL_DIR`, `TDL_IGNORE`, `TDL_NVIM_SOCKET`), `NVIM_APPNAME=nvim-tdl`, config
+> dir (`~/.config/nvim-tdl`), and socket paths (`/tmp/tdl-nvim-*.sock`). Do not
+> rename these — they are internal identifiers, not user-facing, and changing them
+> would break running sessions and installed symlinks.
+
 | Component | Isolation mechanism |
 |---|---|
 | tmux | Dedicated server socket: `tmux -L tdl -f <TDL_DIR>/tmux.conf` |
 | main nvim | `NVIM_APPNAME=nvim-tdl` → config at `~/.config/nvim-tdl → aid/nvim/` |
 | sidebar nvim | `NVIM_APPNAME=nvim-treemux` → config at `~/.config/nvim-treemux/` |
-| install.sh | Does **not** inject into `~/.config/tmux/.tmux.conf` |
-| aliases.sh | Only injects `source <TDL_DIR>/aliases.sh` into `~/.config/.aliases` |
+| opencode | `OPENCODE_CONFIG_DIR=$TDL_DIR/opencode` → `aid/opencode/`, not `~/.config/opencode` |
+| install.sh | Does **not** inject into `~/.config/tmux/.tmux.conf` or `~/.bashrc` |
+| aid.sh | Standalone script in `~/.local/bin/aid` — no shell function injection |
 
 `~/.config/nvim` is never touched. All `tmux` calls in scripts use `tmux -L tdl`.
 
@@ -54,13 +66,14 @@ aid is fully isolated from the user's existing nvim and tmux setup. Nothing is s
 
 | Repo path | Symlinked to |
 |---|---|
+| `aid.sh` | `~/.local/bin/aid` |
 | `nvim/` | `~/.config/nvim-tdl` |
 | `nvim-treemux/treemux_init.lua` | `~/.config/nvim-treemux/treemux_init.lua` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/nvim-treemux/watch_and_update.sh` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/tmux/plugins/treemux/scripts/tree/watch_and_update.sh` |
 | `ensure_treemux.sh` | `~/.config/tmux/ensure_treemux.sh` |
 
-`aliases.sh` is **sourced** (not symlinked). `tmux.conf` is loaded via `-f` (not sourced from user tmux config).
+`aid.sh` is a standalone script in PATH (not sourced). `tmux.conf` is loaded via `-f` on the dedicated server socket (not sourced from the user's tmux config).
 
 ## Pane layout and sizes
 

@@ -19,7 +19,10 @@
 --   1. nvim buffers    — checktime (reloads files changed on disk)
 --   2. gitsigns        — refresh() (re-reads HEAD, recomputes hunk signs)
 --   3. nvim-tree       — tree.reload() (full tree + git status)
---   4. treemux sidebar — :NvimTreeRefresh via tmux send-keys
+--   4. treemux sidebar — aidignore.reset() via tmux send-keys
+--                        mutates explorer.filters.ignore_list in-place then
+--                        reloads; no setup() re-call, no visual disruption.
+--                        See aidignore.lua for private API notes and S2 fallback.
 --
 -- Treemux pane lookup (approach 1: tmux option):
 --   ensure_treemux.sh stores the sidebar pane ID in the tmux option
@@ -58,7 +61,8 @@ local function _refresh_treemux_sidebar()
   if exists ~= "1" then return end
 
   vim.fn.jobstart({
-    "tmux", "-L", "tdl", "send-keys", "-t", sidebar_pane, ":NvimTreeRefresh\r", "",
+    "tmux", "-L", "tdl", "send-keys", "-t", sidebar_pane,
+    ":lua require('aidignore').reset()\r", "",
   })
 end
 

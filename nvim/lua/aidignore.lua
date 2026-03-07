@@ -63,23 +63,39 @@ local function _build(raw)
   return { raw = raw, telescope = telescope }
 end
 
--- Re-run nvim-tree setup with current patterns so filters.custom takes effect,
--- then reload the tree. nvim-tree requires a full re-setup to change filters.
+-- Update live nvim-tree filter state and redraw without calling setup() again.
+--
+-- PRIVATE API DEPENDENCY:
+--   require("nvim-tree.core").get_explorer().filters.ignore_list
+--   Type: table<string, boolean>  (keys are pattern strings, values always true)
+--   This field is read on every should_filter() call inside nvim-tree's render
+--   loop. Mutating it in-place + calling api.tree.reload() updates the visible
+--   tree with zero visual disruption (no window close/reopen, cursor preserved).
+--
+--   Stability: field has existed under this exact name since the multi-instance
+--   refactor (nvim-tree PR #2841). 33 commits to filters.lua, name unchanged.
+--   Monitor: https://github.com/nvim-tree/nvim-tree.lua/blob/master/lua/nvim-tree/explorer/filters.lua
+--
+-- FALLBACK (S2) — if ignore_list is ever renamed/removed, the silent fallback is:
+--   1. tmux kill-pane <sidebar_pane_id>
+--   2. run ensure_treemux.sh to reopen the sidebar fresh (picks up new filters
+--      from disk via aidignore.lua at startup). ~0.5s blank pane visual glitch.
+--   See _refresh_treemux_sidebar() in sync.lua for the pane lookup logic needed.
 local function _apply_to_nvimtree()
-  local ok, api = pcall(require, "nvim-tree.api")
-  if not ok then return end
-  local ok2, nt = pcall(require, "nvim-tree")
-  if not ok2 then return end
+  local ok_core, core = pcall(require, "nvim-tree.core")
+  if not ok_core then return end
+  local ok_api, api = pcall(require, "nvim-tree.api")
+  if not ok_api then return end
 
-  local pats = M.patterns()
-  -- Minimal re-setup: only update filters, preserve existing config.
-  pcall(nt.setup, {
-    filters = {
-      dotfiles    = false,
-      git_ignored = false,
-      custom      = pats.raw,
-    },
-  })
+  local explorer = core.get_explorer()
+  if explorer and explorer.filters and explorer.filters.ignore_list then
+    -- Mutate the live Filters instance directly — no setup() re-call needed.
+    local pats = M.patterns()
+    explorer.filters.ignore_list = {}
+    for _, pat in ipairs(pats.raw) do
+      explorer.filters.ignore_list[pat] = true
+    end
+  end
   pcall(api.tree.reload)
 
   -- Also refresh the treemux sidebar (separate nvim process) via sync.

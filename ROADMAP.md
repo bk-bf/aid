@@ -30,7 +30,7 @@
 - [x] **2026-03**: BUG-003 fix — opencode launched via `split-window` direct arg (not `send-keys`); editor pane via `respawn-pane -k` (not `send-keys`); bypasses zsh autocorrect entirely
 - [x] **2026-03**: `sync.lua`: `reload()` now has explicit step 3 (`aidignore.reset()`) before `sync()`; sidebar refresh sends `:lua require('aidignore').reset()` instead of `:NvimTreeRefresh`
 - [x] **2026-03**: `aid.sh` creates empty `.aidignore` in launch dir if none found up the tree (ensures file watcher always has a target)
-- [x] **2026-03**: Fix lazygit `--git-dir` worktree detection (use `--git-dir` not `--git-common-dir`; `--git-common-dir` returns bare root, causing phantom deleted files)
+- [x] **2026-03**: Fix lazygit `--git-dir` worktree detection (final): `find_git_root()` handles both worktree (`.git` file) and normal repo (`.git` dir); `cwd` fallback; always sets `GIT_DIR`+`GIT_WORK_TREE` so lazygit context tracks the open buffer's worktree — push and branch ops work correctly from any worktree
 - [x] **2026-03**: Move nvim config into aid repo (`aid/nvim/`), symlink `~/.config/nvim → aid/nvim/`
 - [x] **2026-03**: Default install path → `~/.local/share/aid` (XDG compliant)
 - [x] **2026-03**: Braille spinner on headless nvim sync steps

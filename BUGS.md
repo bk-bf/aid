@@ -32,12 +32,13 @@
 **Root cause**: `_cs_apply_style` sets window-local options via `vim.wo[win]` (`number=false`, `signcolumn=no`, etc.). `setlocal x<` (inherit from global) fell back to Neovim's built-in default (`number=false`), not to our `vim.opt.number = true`, because the OPTIONS block was at the bottom of init.lua after `lazy.setup()` — so `vim.o.number` was still `false` when autocmds fired.
 **Fix**: Moved OPTIONS block to the top of init.lua (right after netrw disabling), before all plugin/autocmd code. Replaced `setlocal x<` with explicit `setlocal number signcolumn=yes ...` in the restore autocmds.
 
-### BUG-001: lazygit shows phantom deleted files / untracked files from nvim keybind
+### BUG-001: lazygit shows phantom deleted files / wrong context from nvim keybind
 
-**Status**: closed
+**Status**: closed (final fix 2026-03)
 **Root cause (original)**: `lazygit.nvim` passes `-p <worktree-root>` which expands to `--git-dir=<path>/.git/`. In a git worktree `.git` is a file, not a directory — so lazygit can't find the repo.
 **Root cause (deeper)**: The initial fix used `git rev-parse --git-common-dir` to resolve `GIT_DIR`. This returns the bare repo root (`aid/`). When set as `GIT_DIR` with `GIT_WORK_TREE=aid/main/`, git uses the bare root as the work-tree and treats `aid/main/` as a subdirectory — showing all committed files as deleted and all files in `main/` as untracked.
-**Fix**: Use `git rev-parse --git-dir` instead. This returns the worktree-specific path (`aid/worktrees/main` or `aid/worktrees/docs`), correctly scoping the index to the checked-out branch. lazygit.nvim then receives `-w <work_tree> -g <git_dir>` and shows a clean, accurate view from any worktree.
+**Root cause (recurrence)**: The second fix only set `GIT_DIR`/`GIT_WORK_TREE` when `.git` was a *file* (worktree case). If `.git` was a *directory* (normal repo) or the walk-up found nothing, the vars were left `nil` — lazygit fell back to its internal `-p` flag, which again broke bare-repo + worktree setups. Additionally, this meant opening lazygit from `main/` always gave the `master` worktree context, making it impossible to push or operate on `dev-docs` without a `docs/` buffer open.
+**Final fix**: `find_git_root()` helper handles both `.git` file (worktree) and `.git` directory (normal repo). Falls back to `cwd` if `buf_dir` walk-up finds nothing. Always sets both `GIT_DIR` + `GIT_WORK_TREE` — lazygit context now tracks the open buffer's worktree automatically. Opening a file from `docs/` → lazygit operates on `dev-docs` (push works, correct branch shown).
 **Affects**: any bare-repo + worktree setup where nvim is opened from inside a worktree.
 
 ### BUG-002: Broken symlinks after bare repo restructure

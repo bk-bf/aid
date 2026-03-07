@@ -32,6 +32,14 @@
 **Root cause**: `_cs_apply_style` sets window-local options via `vim.wo[win]` (`number=false`, `signcolumn=no`, etc.). `setlocal x<` (inherit from global) fell back to Neovim's built-in default (`number=false`), not to our `vim.opt.number = true`, because the OPTIONS block was at the bottom of init.lua after `lazy.setup()` — so `vim.o.number` was still `false` when autocmds fired.
 **Fix**: Moved OPTIONS block to the top of init.lua (right after netrw disabling), before all plugin/autocmd code. Replaced `setlocal x<` with explicit `setlocal number signcolumn=yes ...` in the restore autocmds.
 
+### BUG-006: GIT_DIR env var leaked into nvim process after lazygit closes — gitsigns loses git info permanently
+
+**Status**: closed
+**Repro**: open a file from `docs/`; hit `<leader>gg`; use lazygit; close it. All open buffers from `main/` lose git signs and branch info in the statusline.
+**Root cause**: `<leader>gg` sets `vim.env.GIT_DIR` + `vim.env.GIT_WORK_TREE` so lazygit.nvim can pass `-w/-g` flags to lazygit. These env vars were never cleared after `vim.cmd("LazyGit")` returned. `sync.sync()` then fires `gs.refresh()`, which reads `vim.env.GIT_DIR` (gitsigns `repo.lua:494`). With `GIT_DIR=worktrees/docs`, gitsigns tries to resolve every `main/` buffer against the `docs/` worktree toplevel, hits "outside worktree", silently detaches, and the statusline shows no git info for the rest of the session.
+**Secondary effect**: the leaked `GIT_DIR=worktrees/docs` + `GIT_WORK_TREE=docs/` environment was also the root cause of the accidental `5cab8aa`/`26fd97b` corruption commits — lazygit was opened while a `docs/` buffer was active, env vars were set for `dev-docs`, and a commit staged from `main/`'s files was recorded against the `dev-docs` index, making all `main/` files appear deleted. `26fd97b` reversed this, leaving `master` content-identical to `b7b732d`.
+**Fix**: clear `vim.env.GIT_DIR = nil` and `vim.env.GIT_WORK_TREE = nil` immediately after `vim.cmd("LazyGit")` returns. lazygit.nvim reads the env vars once during command construction before `LazyGit` is invoked — they do not need to persist. Clearing them before `sync.sync()` fires ensures gitsigns re-attaches cleanly using each buffer's own directory, not the lazygit session's worktree.
+
 ### BUG-001: lazygit shows phantom deleted files / wrong context from nvim keybind
 
 **Status**: closed (final fix 2026-03)

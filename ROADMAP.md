@@ -1,27 +1,35 @@
 # Roadmap
 
-## Near-term
+## Phase 1 — Harden (fix before any promotion)
 
+- [ ] Replace `sleep 1.5` in `aid.sh` with a poll loop — `until tmux -L tdl show-option -gqv @treemux-key-Tab | grep -q .; do sleep 0.1; done` with a timeout escape hatch; current fixed sleep races on slow machines / high-latency SSH
+- [ ] Support non-Arch distros in `install.sh` (apt/brew pynvim path); current install silently breaks on Ubuntu — blocks any community use
 - [ ] Redo `aid` CLI flags — replace bare subcommands (`aid new`) with POSIX-style flags (`aid -n` / `aid --new`); audit all subcommands for consistency
-- [ ] `aid -h` / `aid --help` — inline man page / usage output
-- [ ] Support non-Arch distros in `install.sh` (apt/brew pynvim install)
-- [ ] Add `aid update` command — git pull + re-run `install.sh`
+- [ ] `aid -h` / `aid --help` — inline usage output
 - [ ] Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
-- [ ] Audit `.aidignore` patterns in Telescope (file_ignore_patterns applied consistently?)
+- [ ] Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?)
 
-## Medium-term
+## Phase 2 — Differentiate (architectural upgrades)
 
-- [ ] Opencode pane opt-in via flag to `aid` (`aid --no-ai` skips opencode pane)
+- [ ] Upgrade sidebar sync to RPC — replace `tmux send-keys :NvimTreeRefresh` with `vim.fn.sockconnect` to sidebar's `$NVIM` socket; current send-keys path silently injects keystrokes if user is typing in the sidebar, risking file corruption
 - [ ] Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
+- [ ] Rename `TDL_` namespace to `AID_` — `TDL_DIR` → `AID_DIR`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `TDL_IGNORE` → `AID_IGNORE`, tmux socket `-L tdl` → `-L aid`, `NVIM_APPNAME nvim-tdl` → `nvim-aid`; do as a single coordinated commit to avoid mixed state
+- [ ] Add `aid update` command — git pull + re-run `install.sh`
+
+## Phase 3 — Publicize
+
+- [ ] Opencode pane opt-in via flag (`aid --no-ai` skips opencode pane) — removes "requires opencode" adoption barrier
+- [ ] Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
 
 ## Deferred / under consideration
 
 - [ ] Dev branch for bleeding-edge work
 - [ ] Consider `main` + feature-branches workflow (currently single `master`)
-- [ ] Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
 
 ## Done
 
+- [x] **2026-03**: Fix GIT_DIR env leak after lazygit closes (BUG-006) — clear `vim.env.GIT_DIR/GIT_WORK_TREE` immediately after `vim.cmd("LazyGit")` so gitsigns re-attaches cleanly on `gs.refresh()` and statusline git info is not lost
+- [x] **2026-03**: Fix lazygit `--git-dir` worktree detection (final): `find_git_root()` handles both worktree (`.git` file) and normal repo (`.git` dir); `cwd` fallback; always sets `GIT_DIR`+`GIT_WORK_TREE` so lazygit context tracks the open buffer's worktree — push and branch ops work correctly from any worktree
 - [x] **2026-03**: `.aidignore` live reload — `aidignore.lua`: disk-based pattern read, `vim.uv` fs_event watcher, `explorer.filters.ignore_list` mutation, live reload in both nvim instances without `setup()` re-call (see ADR-008)
 - [x] **2026-03**: Sidebar nvim shares `aidignore.lua` via `package.path` — `TDL_DIR/nvim/lua` prepended in `treemux_init.lua`; sidebar calls `aidignore.watch()` after setup (see ADR-009)
 - [x] **2026-03**: Session naming `aid@<dirname>` (was `nvim@<basename>`)
@@ -30,7 +38,6 @@
 - [x] **2026-03**: BUG-003 fix — opencode launched via `split-window` direct arg (not `send-keys`); editor pane via `respawn-pane -k` (not `send-keys`); bypasses zsh autocorrect entirely
 - [x] **2026-03**: `sync.lua`: `reload()` now has explicit step 3 (`aidignore.reset()`) before `sync()`; sidebar refresh sends `:lua require('aidignore').reset()` instead of `:NvimTreeRefresh`
 - [x] **2026-03**: `aid.sh` creates empty `.aidignore` in launch dir if none found up the tree (ensures file watcher always has a target)
-- [x] **2026-03**: Fix lazygit `--git-dir` worktree detection (final): `find_git_root()` handles both worktree (`.git` file) and normal repo (`.git` dir); `cwd` fallback; always sets `GIT_DIR`+`GIT_WORK_TREE` so lazygit context tracks the open buffer's worktree — push and branch ops work correctly from any worktree
 - [x] **2026-03**: Move nvim config into aid repo (`aid/nvim/`), symlink `~/.config/nvim → aid/nvim/`
 - [x] **2026-03**: Default install path → `~/.local/share/aid` (XDG compliant)
 - [x] **2026-03**: Braille spinner on headless nvim sync steps

@@ -495,39 +495,65 @@ require("lazy").setup({
       {
         "<leader>gg",
         function()
-          -- Detect git worktrees: if the repo's .git is a file (not a dir),
-          -- lazygit's -p flag breaks (it appends /.git/ to the path).
-          -- Set GIT_DIR (worktree-specific, via --git-dir) + GIT_WORK_TREE so
-          -- lazygit sees the correct branch/index. Must NOT use --git-common-dir
-          -- (bare root) — that makes git treat the bare root as work-tree.
+          -- Detect the git context for the current buffer so lazygit always
+          -- receives explicit -w/-g flags. This avoids lazygit's -p fallback,
+          -- which appends /.git/ and breaks bare-repo + worktree setups.
+          --
+          -- Strategy:
+          --   1. Start from the current buffer's directory (or cwd if no file).
+          --   2. Walk up looking for .git (file = worktree, dir = normal repo).
+          --   3. If nothing found from buf_dir, retry from cwd.
+          --   4. Always set GIT_DIR + GIT_WORK_TREE; never leave them nil.
+          --      Lazygit only uses -w/-g (correct) when both env vars are set.
+
+          local function find_git_root(start_dir)
+            local dir = start_dir
+            for _ = 1, 30 do
+              local stat = vim.uv.fs_stat(dir .. "/.git")
+              if stat then
+                return dir, stat.type  -- "file" = worktree, "directory" = normal repo
+              end
+              local parent = vim.fn.fnamemodify(dir, ":h")
+              if parent == dir then break end
+              dir = parent
+            end
+            return nil, nil
+          end
+
           local buf_dir = vim.fn.expand("%:p:h")
           if buf_dir == "" then buf_dir = vim.fn.getcwd() end
 
-          -- Walk up from buf_dir to find the worktree root (.git file)
-          local dir = buf_dir
-          local work_tree = nil
-          for _ = 1, 20 do
-            local stat = vim.uv.fs_stat(dir .. "/.git")
-            if stat then
-              if stat.type == "file" then
-                work_tree = dir
-              end
-              break
+          local work_tree, git_type = find_git_root(buf_dir)
+
+          -- Second chance: retry from cwd if buf_dir search failed
+          if not work_tree then
+            local cwd = vim.fn.getcwd()
+            if cwd ~= buf_dir then
+              work_tree, git_type = find_git_root(cwd)
             end
-            local parent = vim.fn.fnamemodify(dir, ":h")
-            if parent == dir then break end
-            dir = parent
           end
 
           if work_tree then
-            local git_dir = vim.fn.system("git -C " .. vim.fn.shellescape(work_tree) .. " rev-parse --git-dir"):gsub("%s+$", "")
-            if vim.v.shell_error == 0 then
-              -- git-dir may be relative; resolve to absolute
+            local git_dir
+            if git_type == "file" then
+              -- Worktree: .git file contains "gitdir: <path>" — ask git for the real dir
+              git_dir = vim.fn.system("git -C " .. vim.fn.shellescape(work_tree) .. " rev-parse --git-dir"):gsub("%s+$", "")
+              if vim.v.shell_error ~= 0 then git_dir = nil end
+            else
+              -- Normal repo: .git is a directory directly inside work_tree
+              git_dir = work_tree .. "/.git"
+            end
+
+            if git_dir then
+              -- Resolve relative paths to absolute
               if git_dir:sub(1, 1) ~= "/" then
                 git_dir = vim.fn.fnamemodify(work_tree .. "/" .. git_dir, ":p"):gsub("/$", "")
               end
               vim.env.GIT_DIR = git_dir
               vim.env.GIT_WORK_TREE = work_tree
+            else
+              vim.env.GIT_DIR = nil
+              vim.env.GIT_WORK_TREE = nil
             end
           else
             vim.env.GIT_DIR = nil

@@ -72,7 +72,8 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  TMUX   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   <C-h/j/k/l>      navigate panes          aid              new session (cwd)
-  <leader>?        reopen this cheatsheet
+  <leader>?        reopen this cheatsheet  aid -a [name]    attach to session
+                                           aid -l           list sessions
 
 
                       ── open any file to start editing ──

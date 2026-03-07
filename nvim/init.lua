@@ -561,6 +561,13 @@ require("lazy").setup({
           end
 
           vim.cmd("LazyGit")
+          -- Clear env vars immediately after lazygit launches.
+          -- lazygit.nvim reads them once to build the -w/-g flags; they must
+          -- not persist into the nvim process after lazygit closes or gitsigns
+          -- will inherit them on gs.refresh() and treat every buffer as
+          -- "outside worktree", breaking the statusline git info permanently.
+          vim.env.GIT_DIR = nil
+          vim.env.GIT_WORK_TREE = nil
           -- Explicit post-lazygit refresh (belt-and-suspenders alongside
           -- the TermClose autocmd, in case TermClose fires before the
           -- terminal buffer is fully torn down).

@@ -2,6 +2,10 @@
 
 ## Open
 
+### BUG-007: dotfiles git repo deletes ~/.config/nvim-tdl symlink on branch operations
+
+**Status**: open — see [bugs/BUG-007.md](bugs/BUG-007.md)
+
 <!-- template:
 ### BUG-N: title
 **Status**: open | investigating | blocked

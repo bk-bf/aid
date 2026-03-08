@@ -1,6 +1,6 @@
 -- sync.lua — central git-sync coordinator + full workspace reload
 --
--- Three entry points:
+-- Four entry points:
 --
 --   require("sync").sync()
 --     Full git-state refresh. Call only on events that signal external change.
@@ -14,18 +14,32 @@
 --     Full workspace reload triggered manually via <leader>R.
 --     Reloads tmux config, nvim config, then calls sync() for state refresh.
 --
+--   require("sync").watch_buf([bufnr])
+--     Watch the parent directory of the given buffer (default: current buffer)
+--     for file changes using vim.uv.fs_event. On any change, fires sync()
+--     automatically — opencode edits appear in nvim immediately, no pane switch
+--     required. Idempotent: already-watched directories are skipped. Call on
+--     BufEnter. vim.uv on Linux (inotify) only supports non-recursive watches,
+--     so we watch per-buffer-directory rather than cwd recursively.
+--
+--   require("sync").stop_watchers()
+--     Stop all active directory watchers. Call on VimLeave.
+--
 -- sync() is triggered by:
 --   • FocusGained         — nvim regains focus after any external tool
 --   • TermClose           — lazygit float closes
 --   • explicit call       — post vim.cmd("LazyGit") in the <leader>gg keybind
+--   • fs_event watcher    — watch_buf() fires sync() on any change in open buffer's directory
 --
 -- checktime() is triggered by:
 --   • BufEnter/CursorHold — belt-and-suspenders for buffer reload only;
 --                           does NOT run gitsigns/nvim-tree to avoid flicker
---   • pane-focus-in hook  — tmux.conf fires `nvim --remote-send checktime` into
---                           AID_NVIM_SOCKET on every pane switch; ensures buffers
---                           edited externally (e.g. by opencode) reload without
---                           requiring the user to focus the nvim pane (T-014/BUG-009)
+--
+-- sync() is also triggered by:
+--   • pane-focus-in hook  — tmux.conf fires `nvim --remote-send lua sync.sync()` into
+--                           AID_NVIM_SOCKET on every pane switch; ensures buffers AND
+--                           gitsigns line-change highlights update without requiring the
+--                           user to physically focus the nvim pane (T-014/BUG-009)
 --
 -- Components refreshed by sync():
 --   1. nvim buffers    — checktime (reloads files changed on disk)
@@ -45,6 +59,12 @@
 --   no send-keys keystrokes injected, no cross-pane redraw bleed (BUG-008).
 
 local M = {}
+
+-- Active fs_event watcher handles keyed by directory path.
+-- vim.uv.new_fs_event on Linux (inotify) watches a single directory only —
+-- recursive=true is a no-op on Linux. We therefore watch the parent directory
+-- of each open buffer individually and add new watches on BufEnter.
+local _watchers = {}
 
 -- Refresh the treemux sidebar nvim-tree via direct msgpack-RPC.
 -- treemux_init.lua registers its socket in @-treemux-nvim-socket-<editor_pane_id>.
@@ -130,6 +150,42 @@ function M.reload()
 
     vim.notify("workspace reloaded", vim.log.levels.INFO)
   end)
+end
+
+-- Watch the parent directory of a buffer file.
+-- Called on BufEnter. Skips special buffers (no file, non-existent paths).
+-- Idempotent: if the directory is already watched, does nothing.
+-- On any change in that directory, fires sync() so external edits (e.g.
+-- from opencode) appear in nvim immediately without requiring a pane switch.
+function M.watch_buf(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local path = vim.api.nvim_buf_get_name(bufnr)
+  if path == "" then return end
+  local dir = vim.fn.fnamemodify(path, ":h")
+  if dir == "" or dir == "." then dir = vim.fn.getcwd() end
+  if _watchers[dir] then return end  -- already watching
+
+  local handle = vim.uv.new_fs_event()
+  if not handle then return end
+
+  local ok = pcall(function()
+    handle:start(dir, {}, vim.schedule_wrap(function(err, _, _)
+      if err then return end
+      M.sync()
+    end))
+  end)
+
+  if ok then
+    _watchers[dir] = handle
+  end
+end
+
+-- Stop all active directory watchers. Called on VimLeave to clean up handles.
+function M.stop_watchers()
+  for dir, handle in pairs(_watchers) do
+    pcall(function() handle:stop() end)
+    _watchers[dir] = nil
+  end
 end
 
 return M

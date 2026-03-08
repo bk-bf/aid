@@ -783,7 +783,9 @@ vim.api.nvim_create_autocmd({ "BufEnter", "CursorHold", "CursorHoldI" }, {
 -- nvim-tree + Telescope pick up the correct .aidignore for the new directory.
 vim.api.nvim_create_autocmd("DirChanged", {
   pattern = "*",
-  callback = function() require("aidignore").reset() end,
+  callback = function()
+    require("aidignore").reset()
+  end,
 })
 
 -- On startup: open nvim-tree (outside tmux only) and show cheatsheet on empty buffer.
@@ -804,6 +806,20 @@ vim.api.nvim_create_autocmd("VimEnter", {
     if is_empty and not vim.o.diff then
       vim.schedule(_cs_open)
     end
+    -- Watch the current buffer's directory for external edits (e.g. opencode).
+    -- BufEnter handles subsequent file opens; VimLeave cleans up all handles.
+    sync.watch_buf(data.buf)
   end,
+})
+
+-- Watch each buffer's directory as it's entered, so opencode edits to any
+-- open file are picked up immediately without requiring a pane switch.
+vim.api.nvim_create_autocmd("BufEnter", {
+  callback = function(ev) sync.watch_buf(ev.buf) end,
+})
+
+-- Clean up all fs_event handles on exit to avoid libuv handle leak warnings.
+vim.api.nvim_create_autocmd("VimLeave", {
+  callback = function() sync.stop_watchers() end,
 })
 

@@ -173,8 +173,10 @@ tmux -L aid set-environment -g NVIM_APPNAME "nvim"
 # inherits it at startup and sets g:nvim_tree_remote_socket_path correctly.
 # Socket path inherits the aid@<name> session name — @ is legal in UNIX socket paths
 # and in /tmp filenames. If a tool ever chokes on it, the socket path is the first place to check.
+# Set session-local (not global) so multiple concurrent aid sessions each target their own nvim.
+# #{E:AID_NVIM_SOCKET} in tmux.conf hooks reads the pane's inherited env → session env → correct.
 nvim_socket="/tmp/aid-nvim-${session}.sock"
-tmux -L aid set-environment -g AID_NVIM_SOCKET "$nvim_socket"
+tmux -L aid set-environment -t "$session" AID_NVIM_SOCKET "$nvim_socket"
 dbg "nvim_socket=$nvim_socket"
 
 # IDE layout sizes — all pane geometry owned here, not scattered in tmux.conf

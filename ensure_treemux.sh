@@ -11,7 +11,7 @@
 # absolute column count, ensuring it always occupies OPENCODE_PCT % of the
 # total window regardless of terminal size.
 
-TREEMUX_SCRIPTS=~/.config/tmux/plugins/treemux/scripts
+TREEMUX_SCRIPTS="${AID_DIR}/tmux/plugins/treemux/scripts"
 
 # Target: opencode occupies this percentage of the total window width.
 # At 154 cols, 28% -> 43 cols.

@@ -2,8 +2,9 @@
 # aid.sh — main entry point. Symlinked into ~/.local/bin/aid by install.sh.
 #
 # Isolation: aid runs on its own tmux server socket (-L aid) with its own
-# config (-f), and sets XDG_CONFIG_HOME=$AID_DIR at launch time so nvim
-# resolves its config directly to $AID_DIR/nvim — no symlink in ~/.config needed.
+# config (-f), and sets all four XDG dirs to $AID_DIR at launch time so nvim
+# resolves config/data/state/cache to $AID_DIR/nvim — nothing written to
+# ~/.config/nvim, ~/.local/share/nvim, ~/.local/state/nvim, or ~/.cache/nvim.
 # NVIM_APPNAME=nvim (main editor) resolves to $AID_DIR/nvim.
 # NVIM_APPNAME=treemux (sidebar) resolves to ~/.config/aid/treemux (symlink managed by install.sh).
 # The user's ~/.config/nvim and existing tmux sessions are never touched.
@@ -161,14 +162,21 @@ dbg "starting tmux session"
 tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "$session" \
   -x "$(tput cols)" -y "$(tput lines)"
 
-# Export AID_DIR, AID_IGNORE, XDG_CONFIG_HOME, and OPENCODE_CONFIG_DIR into the server environment
-# so all panes inherit them. XDG_CONFIG_HOME=$AID_DIR means nvim resolves its config directly
-# to $AID_DIR/nvim at launch — no symlink in ~/.config/ required.
-# OPENCODE_CONFIG_DIR isolates opencode to aid's own
-# config dir (commands/, package.json) instead of ~/.config/opencode/.
-tmux -L aid set-environment -g AID_DIR "$AID_DIR"
-tmux -L aid set-environment -g AID_IGNORE "$AID_IGNORE"
-tmux -L aid set-environment -g XDG_CONFIG_HOME "$AID_DIR"
+# Export all environment variables into the server so every pane inherits them.
+#
+# XDG isolation: all four XDG dirs are redirected to $AID_DIR so nvim never
+# writes into ~/.config/nvim, ~/.local/share/nvim, ~/.local/state/nvim, or
+# ~/.cache/nvim.  With NVIM_APPNAME=nvim, nvim appends the appname to each XDG
+# base, yielding $AID_DIR/nvim/{config,data,state,cache} — fully self-contained.
+#
+# OPENCODE_CONFIG_DIR isolates opencode to aid's own config dir (commands/,
+# package.json) instead of ~/.config/opencode/.
+tmux -L aid set-environment -g AID_DIR             "$AID_DIR"
+tmux -L aid set-environment -g AID_IGNORE          "$AID_IGNORE"
+tmux -L aid set-environment -g XDG_CONFIG_HOME     "$AID_DIR"
+tmux -L aid set-environment -g XDG_DATA_HOME       "$AID_DIR"
+tmux -L aid set-environment -g XDG_STATE_HOME      "$AID_DIR"
+tmux -L aid set-environment -g XDG_CACHE_HOME      "$AID_DIR"
 tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
 # NVIM_APPNAME in the server environment means every pane shell inherits it —
 # no dependency on the send-keys command being delivered intact.
@@ -229,7 +237,7 @@ tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/ensure_treemux.sh"
 # To kill the session entirely: close the tmux window or run `aid kill`.
 dbg "respawning editor pane into nvim loop"
 tmux -L aid respawn-pane -k -t "$editor_pane_id" \
-  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
+  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") XDG_DATA_HOME=$(printf '%q' "$AID_DIR") XDG_STATE_HOME=$(printf '%q' "$AID_DIR") XDG_CACHE_HOME=$(printf '%q' "$AID_DIR") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
 
 dbg "attaching to session=$session"
 attach_or_switch "$session"

@@ -3,8 +3,9 @@
 ## Phase 1 — Harden (fix before any promotion)
 
 - [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
-- [ ] **BUG-014**: `<Tab>` in treemux sidebar opens file inside sidebar pane instead of editor pane; fix: unmap `<Tab>` in `treemux_init.lua` after plugin setup (see [bugs/BUG-014.md](bugs/BUG-014.md))
+- [ ] **T-023 / BUG-014**: `<Tab>` in treemux sidebar opens file inside sidebar pane instead of editor pane; fix: unmap `<Tab>` in `treemux_init.lua` after plugin setup (see [bugs/BUG-014.md](bugs/BUG-014.md))
 - [ ] **T-022**: **Cross-distro install support** — expand `install.sh` beyond Arch/CachyOS so aid works out-of-the-box on mainstream Linux distros (Ubuntu/Debian, Fedora/RHEL, Alpine, Arch) and macOS. Currently the only managed dependency is `python-pynvim` via `pacman`; every other prerequisite is assumed present, which is false on stock Ubuntu/Fedora images.
+- [ ] **T-024 / BUG-015**: Intermittent `E5560: writefile must not be called in a fast event context` after lazygit commit; needs stack trace on next occurrence to identify call site (see [bugs/BUG-015.md](bugs/BUG-015.md))
 
   **Full dependency audit:**
 
@@ -45,7 +46,6 @@
   - **Scope boundary**: aid wires these plugins together with sensible defaults and pre-configured keymaps. It does not attempt to provide zero-config per-project debugging (virtualenv paths, source maps, attach configs are inherently project-specific and belong in per-project `.nvim.lua` or `launch.json`). The seam aid smooths is "none of these tools are installed or connected" → "they are installed, connected, and have sane keymaps". The remaining per-project tuning is user-land.
   - **Known rough edge**: Python debugging — debugpy installed by mason runs in mason's own venv, not the project venv. Users must point `dap.configurations.python[n].pythonPath` at their project interpreter. Document this prominently rather than attempting a fragile auto-detect.
 
-- [ ] **T-007**: Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
 - [ ] **T-008**: Add `aid --update` command — git pull + re-run `install.sh`
 - [ ] **T-017**: Replace `lazygit.nvim` env-var integration with a raw terminal float — build the lazygit command directly (`lazygit -w <work_tree> -g <git_dir>`), never touch `GIT_DIR`/`GIT_WORK_TREE` env vars; eliminates BUG-006 class of env leaks permanently (see [bugs/BUG-006.md](bugs/BUG-006.md))
 
@@ -63,6 +63,7 @@
 
 ## Done
 
+- [x] **2026-03**: T-007 — self-contained theme system; palette centralized in `nvim/lua/palette.lua`; bufferline, statusline, treemux highlights, and tmux status bar all driven from single source; `tokyonight` dependency removed from treemux; `gen-tmux-palette.sh` renders tmux colors at session start
 - [x] **2026-03**: Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?) — audit complete; revealed BUG-011 (Telescope patterns frozen at startup, not live-updated); fix tracked as T-021
 - [x] **2026-03**: T-014 / BUG-009 — opencode file edits not visible in nvim until focus switch; `vim.uv.new_fs_event` watcher per open buffer's directory (`sync.watch_buf()`); BUG-013 fixed: `AID_NVIM_SOCKET` scoped per-session; `pane-focus-in` hook upgraded to `sync.sync()`
 - [x] **2026-03**: T-021 / BUG-011 — `.aidignore` changes not reflected in Telescope until nvim restart; `_apply_to_telescope()` added to `aidignore.lua`

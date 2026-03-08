@@ -93,29 +93,11 @@ All pane geometry is owned in `aid.sh`. Nothing in `tmux.conf` sets sizes.
 
 ## Git-sync coordinator (`nvim/lua/sync.lua`)
 
-Central coordination point for post-branch-switch refresh. Prevents stale state in all git-aware components when lazygit switches branches.
+Three entry points — see `docs/ARCHITECTURE.md` for full detail:
 
-**Two entry points:**
-
-`sync.sync()` — lightweight, safe to call from autocmds:
-1. `silent! checktime` — reload buffers changed on disk
-2. `gitsigns.refresh()` — re-read HEAD, recompute hunk signs + branch name
-3. `nvim-tree.api.tree.reload()` — full tree rebuild + git status
-4. `tmux -L aid send-keys` to treemux sidebar → `:lua require('aidignore').reset()`
-
-`sync.reload()` — full workspace reload, bound to `<leader>R`:
-1. `tmux -L aid source-file <AID_DIR>/tmux.conf`
-2. `source $MYVIMRC`
-3. `sync.sync()`
-
-**Trigger points for `sync.sync()`:**
-- `FocusGained` / `BufEnter` / `CursorHold` autocmds
-- `TermClose` autocmd (lazygit float closes)
-- Explicit call after `vim.cmd("LazyGit")` in `<leader>gg` keybind
-
-**Sidebar pane lookup**: reads tmux option `@-treemux-registered-pane-$TMUX_PANE` (written by `ensure_treemux.sh`).
-
-**Treemux self-heal** (`treemux_init.lua`): `FileChangedShell` sets `vim.v.fcs_choice = "reload"` (suppresses blocking prompt) + rebuilds nvim-tree. `FileChangedShellPost` does `silent! checktime` + rebuild.
+- `sync.sync()` — full refresh (checktime + gitsigns + nvim-tree + treemux RPC). Call on `FocusGained`, `TermClose`, and post-LazyGit.
+- `sync.checktime()` — lightweight (`silent! checktime` only). Call on `BufEnter`, `CursorHold`, `CursorHoldI`, and from the `pane-focus-in` tmux hook. **Do not** call `sync()` from these — it causes sign-column flicker.
+- `sync.reload()` — full workspace reload (`<leader>R`): tmux config → nvim config → aidignore.reset() → sync().
 
 ## Unique features
 

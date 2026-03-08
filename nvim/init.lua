@@ -756,9 +756,10 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
--- Git-sync: refresh all git-aware components when nvim regains focus
--- or when a terminal buffer (e.g. lazygit float) closes.
-vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold", "CursorHoldI" }, {
+-- Git-sync: full refresh (gitsigns + nvim-tree + treemux) when nvim regains
+-- focus or a terminal buffer (e.g. lazygit float) closes — these events
+-- signal that external state (git, filesystem) may have changed.
+vim.api.nvim_create_autocmd({ "FocusGained" }, {
   pattern = "*",
   callback = function() sync.sync() end,
 })
@@ -767,6 +768,15 @@ vim.api.nvim_create_autocmd({ "FocusGained", "BufEnter", "CursorHold", "CursorHo
 vim.api.nvim_create_autocmd("TermClose", {
   pattern = "*",
   callback = function() sync.sync() end,
+})
+
+-- Lightweight checktime only on high-frequency events — avoids constant
+-- sign-column redraws (gitsigns/nvim-tree) that cause line-number flicker.
+-- checktime is sufficient here: it reloads buffers edited externally (e.g.
+-- by opencode) without triggering a full git-state repaint.
+vim.api.nvim_create_autocmd({ "BufEnter", "CursorHold", "CursorHoldI" }, {
+  pattern = "*",
+  callback = function() sync.checktime() end,
 })
 
 -- Bust aidignore cache and restart file watcher when cwd changes so

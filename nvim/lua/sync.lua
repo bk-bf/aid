@@ -1,10 +1,14 @@
 -- sync.lua — central git-sync coordinator + full workspace reload
 --
--- Two entry points:
+-- Three entry points:
 --
 --   require("sync").sync()
---     Lightweight git-state refresh. Safe to call frequently from autocmds.
+--     Full git-state refresh. Call only on events that signal external change.
 --     Refreshes buffers (checktime), gitsigns, nvim-tree, and treemux sidebar.
+--
+--   require("sync").checktime()
+--     Lightweight: checktime only, no sign-column or tree redraws.
+--     Safe for high-frequency events (BufEnter, CursorHold) — no flicker.
 --
 --   require("sync").reload()
 --     Full workspace reload triggered manually via <leader>R.
@@ -12,68 +16,64 @@
 --
 -- sync() is triggered by:
 --   • FocusGained         — nvim regains focus after any external tool
---   • BufEnter/CursorHold — belt-and-suspenders; catches cases where FocusGained
---                           does not fire (e.g. some terminal emulators)
 --   • TermClose           — lazygit float closes
+--   • explicit call       — post vim.cmd("LazyGit") in the <leader>gg keybind
+--
+-- checktime() is triggered by:
+--   • BufEnter/CursorHold — belt-and-suspenders for buffer reload only;
+--                           does NOT run gitsigns/nvim-tree to avoid flicker
 --   • pane-focus-in hook  — tmux.conf fires `nvim --remote-send checktime` into
 --                           AID_NVIM_SOCKET on every pane switch; ensures buffers
 --                           edited externally (e.g. by opencode) reload without
 --                           requiring the user to focus the nvim pane (T-014/BUG-009)
---   • explicit call       — post vim.cmd("LazyGit") in the <leader>gg keybind
 --
 -- Components refreshed by sync():
 --   1. nvim buffers    — checktime (reloads files changed on disk)
 --   2. gitsigns        — refresh() (re-reads HEAD, recomputes hunk signs)
 --   3. nvim-tree       — tree.reload() (full tree + git status)
---   4. treemux sidebar — aidignore.reset() via tmux send-keys
+--   4. treemux sidebar — aidignore.reset() via direct msgpack-RPC (T-016/BUG-008)
 --                        mutates explorer.filters.ignore_list in-place then
 --                        reloads; no setup() re-call, no visual disruption.
 --                        See aidignore.lua for private API notes and S2 fallback.
 --
--- Treemux pane lookup (approach 1: tmux option):
---   ensure_treemux.sh stores the sidebar pane ID in the tmux option
---   @-treemux-registered-pane-<main_pane_id>. We read that option here.
---
--- TODO: research and compare with approach 2 (nvim-tree-remote RPC transport):
---   transport.exec(ex, addr_override) already sends arbitrary Ex commands to
---   main nvim via msgpack-rpc. The reverse direction — main nvim pushing a
---   refresh command into treemux's nvim — could use the same channel by
---   looking up treemux's nvim socket via vim.fn.serverlist() in the treemux
---   nvim process. This would be more robust than tmux send-keys (no timing
---   issues, works even when the pane is not the active one) and should be
---   evaluated once the current approach is validated in daily use.
+-- Treemux RPC (T-016):
+--   treemux_init.lua writes its vim.v.servername into the tmux option
+--   @-treemux-nvim-socket-<editor_pane_id> on VimEnter and removes it on
+--   VimLeave. sync.lua reads that option, opens a sockconnect channel, and
+--   calls nvim_exec_lua("require('aidignore').reset()").
+--   This is silent and invisible in the treemux pane — no cmdline flash,
+--   no send-keys keystrokes injected, no cross-pane redraw bleed (BUG-008).
 
 local M = {}
 
--- Refresh the treemux sidebar nvim-tree via tmux send-keys.
--- Reads @-treemux-registered-pane-$TMUX_PANE to find the sidebar pane ID.
+-- Refresh the treemux sidebar nvim-tree via direct msgpack-RPC.
+-- treemux_init.lua registers its socket in @-treemux-nvim-socket-<editor_pane_id>.
 local function _refresh_treemux_sidebar()
   local tmux_pane = vim.env.TMUX_PANE
   if not tmux_pane or tmux_pane == "" then return end
 
-  -- ensure_treemux.sh stores: "<sidebar_pane_id>,<args>"
-  local raw = vim.fn.system(
-    "tmux -L aid show-option -gqv '@-treemux-registered-pane-" .. tmux_pane .. "'"
+  local socket = vim.fn.system(
+    "tmux -L aid show-option -gqv '@-treemux-nvim-socket-" .. tmux_pane .. "'"
   ):gsub("%s+$", "")
-  if raw == "" then return end
+  if socket == "" then return end
 
-  local sidebar_pane = raw:match("^([^,]+)")
-  if not sidebar_pane or sidebar_pane == "" then return end
-
-  -- Verify the pane actually exists before sending
-  local exists = vim.fn.system(
-    "tmux -L aid list-panes -F '#{pane_id}' | grep -qF '" .. sidebar_pane .. "' && echo 1 || echo 0"
-  ):gsub("%s+$", "")
-  if exists ~= "1" then return end
-
-  vim.fn.jobstart({
-    "tmux", "-L", "aid", "send-keys", "-t", sidebar_pane,
-    ":lua require('aidignore').reset()\r", "",
-  })
+  -- Fire-and-forget: open a channel, notify (no wait for response), close.
+  -- rpcnotify is non-blocking — does not stall the main nvim event loop.
+  -- pcall guards against a dead socket (treemux restarting, etc.).
+  pcall(function()
+    local chan = vim.fn.sockconnect("pipe", socket, { rpc = true })
+    vim.rpcnotify(chan, "nvim_exec_lua", "require('aidignore').reset()", {})
+    -- brief yield so the notification is flushed before we close the channel
+    vim.defer_fn(function() pcall(vim.fn.chanclose, chan) end, 500)
+  end)
 end
 
 -- Main sync entry point. Safe to call from any autocmd or keybind.
 -- Uses vim.schedule so it never blocks the event loop.
+-- Runs all four components: checktime, gitsigns, nvim-tree, treemux sidebar.
+-- Only call from events that signal an external state change (FocusGained,
+-- TermClose). For high-frequency events (BufEnter, CursorHold) use
+-- sync.checktime() instead to avoid constant sign-column redraws.
 function M.sync()
   vim.schedule(function()
     -- 1. Reload buffers that changed on disk (silent — no "press ENTER" prompts)
@@ -91,8 +91,16 @@ function M.sync()
       pcall(nt.tree.reload)
     end
 
-    -- 4. Refresh treemux sidebar (separate nvim process)
+    -- 4. Refresh treemux sidebar (separate nvim process) via RPC
     _refresh_treemux_sidebar()
+  end)
+end
+
+-- Lightweight variant: checktime only, no sign-column or tree redraws.
+-- Safe to call from BufEnter / CursorHold without causing visual flicker.
+function M.checktime()
+  vim.schedule(function()
+    vim.cmd("silent! checktime")
   end)
 end
 

@@ -17,6 +17,35 @@ end
 -- contains the nvim PID — something a fixed/predictable path won't satisfy.
 vim.g.nvim_tree_remote_socket_path = os.getenv("AID_NVIM_SOCKET") or ""
 
+-- T-016/BUG-008: register our own socket path in a tmux option so sync.lua in
+-- the editor nvim can reach us via direct msgpack-RPC instead of send-keys.
+-- Keyed by the editor pane ID (TMUX_PANE is the editor pane because treemux is
+-- launched from the editor pane context). Option name mirrors the pane
+-- registration convention already used by ensure_treemux.sh.
+-- Cleanup on exit so a stale path is never picked up after restart.
+local _tmux_pane = os.getenv("TMUX_PANE") or ""
+if _tmux_pane ~= "" then
+  vim.api.nvim_create_autocmd("VimEnter", {
+    once = true,
+    callback = function()
+      vim.fn.jobstart({
+        "tmux", "-L", "aid", "set-option", "-g",
+        "@-treemux-nvim-socket-" .. _tmux_pane,
+        vim.v.servername,
+      })
+    end,
+  })
+  vim.api.nvim_create_autocmd("VimLeave", {
+    once = true,
+    callback = function()
+      vim.fn.jobstart({
+        "tmux", "-L", "aid", "set-option", "-gu",
+        "@-treemux-nvim-socket-" .. _tmux_pane,
+      })
+    end,
+  })
+end
+
 -- Remove the white status bar below
 vim.o.laststatus = 0
 

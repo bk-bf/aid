@@ -16,10 +16,6 @@
 
 **Status**: open — **Roadmap**: T-014 — see [bugs/BUG-009.md](bugs/BUG-009.md)
 
-### BUG-007: dotfiles git repo deletes ~/.config/nvim-tdl symlink on branch operations
-
-**Status**: open — **Roadmap**: T-013 — see [bugs/BUG-007.md](bugs/BUG-007.md)
-
 <!-- template:
 ### BUG-N: title
 **Status**: open | investigating | blocked
@@ -28,6 +24,10 @@
 -->
 
 ## Closed
+
+### BUG-007: dotfiles git repo deletes ~/.config/nvim symlink on branch operations
+
+**Status**: closed — T-013 — see [bugs/BUG-007.md](bugs/BUG-007.md)
 
 ### BUG-003: opencode launch command visible in pane before startup completes
 

@@ -29,10 +29,11 @@ Archived ADRs (superseded and no longer referenced by active work) are in `archi
 **Decision**: Keep treemux. The file tree sidebar remains a separate tmux pane running its own nvim process (`NVIM_APPNAME=treemux`). The layout is three tmux panes: treemux sidebar (left) | editor (middle) | opencode (right). The architecture cost is accepted.
 
 **Trial conducted (T-020, then reverted 2026-03)**:
-The alternative — nvim-tree inside main nvim — was implemented and reverted. Two structural problems were confirmed as not fixable without deeper surgery than the simplification was worth:
+The alternative — nvim-tree inside main nvim — was implemented and reverted. Three structural problems were confirmed as not fixable without deeper surgery than the simplification was worth:
 
 1. **Terminal bleed**: any tmux split (`M-v`, `M-h`) from the editor pane produces a new pane containing the full nvim process — nvim-tree column included. The treemux sidebar is a separate tmux pane; no nvim window can visually touch it.
 2. **Tab bar spans sidebar**: bufferline renders across the full nvim width. `bufferline.offsets` is cosmetic mitigation only; it breaks on resize.
+3. **Float overlaps sidebar**: any nvim float (lazygit, telescope, etc.) rendered inside the editor pane covers the full nvim width — including the column where the sidebar would be. With treemux as a separate tmux pane, floats are hard-bounded by the tmux pane edge and cannot bleed into the sidebar. 
 
 **Why closed now**: further re-evaluation of workarounds (e.g. migrating terminal usage from tmux splits to nvim `:terminal` splits) would require ongoing UX/UI design work with no guaranteed resolution. The treemux architecture works, the bugs it carries (BUG-008, BUG-010) and the debt it carries (T-006) are concrete and fixable. Closing the question and fixing the known issues is better than continued deliberation.
 

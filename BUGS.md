@@ -14,6 +14,12 @@
 **Repro**: focus the treemux sidebar pane; press `<Tab>`; a file buffer opens inside the sidebar pane instead of the main editor pane.
 **Notes**: `<Tab>` → `BufferLineCycleNext` is active in the sidebar's nvim instance because it loads the full plugin set via lazy. Fix: unmap `<Tab>` in `treemux_init.lua` after setup. See [bugs/BUG-014.md](bugs/BUG-014.md).
 
+### BUG-015: E5560 "writefile must not be called in a fast event context" after lazygit commit
+
+**Status**: investigating — needs reproduction
+**Repro**: open lazygit (`<leader>gg`), stage files, press `c` to commit; check `:messages` after closing lazygit — E5560 present intermittently.
+**Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [bugs/BUG-015.md](bugs/BUG-015.md).
+
 <!-- template:
 ### BUG-N: title
 **Status**: open | investigating | blocked

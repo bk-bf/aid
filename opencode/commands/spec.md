@@ -282,19 +282,43 @@ Use diagrams only if the relationship is genuinely hard to express in prose or a
 
 Architecture decision records — why things are the way they are.
 
+ADR statuses:
+- **Under consideration** — open question, no decision made, may block other work
+- **Made** — decided and implemented
+- **Superseded** — previously made, overridden by a later ADR (kept for historical record)
+
 ---
+
+## Under Consideration
+
+---
+
+## Made
+
+---
+
+## Superseded
+
 ```
 
-Write one ADR for each key decision already implied by the project description. ADR format:
+Write one ADR for each key decision already implied by the project description. Place it under the appropriate section header. ADR format:
 
 ```
-## ADR-NNN: <short title>
+### ADR-NNN: <short title>
 
 **Date**: <YYYY-MM>
-**Decision**: <what was decided, in one sentence>
-**Reason**: <why — the constraint, trade-off, or evidence that drove it>
+**Status**: Made | Under consideration | Superseded by ADR-NNN
+**Decision**: <what was decided, in one sentence> (omit for Under consideration)
+**Reason**: <why — the constraint, trade-off, or evidence that drove it> (omit for Under consideration)
 **Alternatives rejected**: <what else was considered and why it lost> (omit if none)
 **Supersedes**: <ADR-NNN> (omit if none)
+```
+
+For **Under consideration** ADRs, replace `**Decision**` and `**Reason**` with:
+```
+**The question**: <what needs to be decided>
+**Options**: <the realistic choices and their trade-offs>
+**Blocking**: <T-NNN list of roadmap items that cannot proceed until this is decided>
 ```
 
 Only write ADRs for real decisions with real reasons. Do not write ADRs for obvious defaults ("we use git for version control").
@@ -574,7 +598,7 @@ Do not begin writing files until this plan is complete. If no splits are needed,
 
 **docs/ARCHITECTURE.md**: Pull together all technical descriptions scattered across existing docs. Restructure under the standard sections (Overview, Boot sequence, Key modules, Data flow, Environment/config). Add LOC cap comment.
 
-**docs/DECISIONS.md**: Find all decision rationale in existing docs — could be inline comments, a CHANGELOG, a RATIONALE file, scattered notes, or implicit in commit messages. Convert to ADR format. Renumber sequentially (ADR-001, ADR-002, ...). Only record decisions with genuine reasons; skip defaults.
+**docs/DECISIONS.md**: Find all decision rationale in existing docs — could be inline comments, a CHANGELOG, a RATIONALE file, scattered notes, or implicit in commit messages. Convert to ADR format. Renumber sequentially (ADR-001, ADR-002, ...). Place each ADR under the correct section header (`## Under Consideration`, `## Made`, or `## Superseded`). The `**Status**` field is required on every ADR. Only record decisions with genuine reasons; skip defaults.
 
 **docs/ROADMAP.md**: Find all TODO items, planned features, and completed items. Organise into labelled phases by theme, not version. Move completed items to `## Done` with `- [x] <YYYY-MM>: ...` format. Open tasks must carry a stable task number: `- [ ] **T-NNN**: <description>`. Numbers are assigned sequentially across all phases and never reused. Assign the next unused number when adding a new task; preserve existing numbers when migrating tasks. If dates are unknown, use the current month.
 

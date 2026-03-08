@@ -80,7 +80,8 @@ Move every item in the `## Closed` section that is **referenced nowhere in any c
 After archiving, scan the documentation for:
 
 - References to archived items (now gone from main docs) — remove or replace with a note: `(see archive)`
-- ADRs in `DECISIONS.md` that are marked `*(superseded by ADR-NNN)*` and are also referenced nowhere else — move them to `aid/docs/archive/DECISIONS-<YYYY-MM>.md`.
+- ADRs in `DECISIONS.md` that are marked `**Status**: Superseded` and are also referenced nowhere else — move them to `aid/docs/archive/DECISIONS-<YYYY-MM>.md` and leave a one-line stub under `## Superseded` linking to the archive file.
+- Any ADR whose status has changed (e.g. an **Under consideration** ADR that has since been decided) — update the `**Status**` field, move it to the correct section (`## Made` or `## Superseded`), and add the `**Decision**` and `**Reason**` fields if they were absent.
 - Any wording that describes a plan, intention, or TODO that has since been implemented — replace with the factual description of the implemented behaviour.
 
 ### Bug ↔ Roadmap cross-link audit

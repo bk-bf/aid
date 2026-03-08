@@ -4,6 +4,35 @@
 
 - [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
 - [ ] **BUG-014**: `<Tab>` in treemux sidebar opens file inside sidebar pane instead of editor pane; fix: unmap `<Tab>` in `treemux_init.lua` after plugin setup (see [bugs/BUG-014.md](bugs/BUG-014.md))
+- [ ] **T-022**: **Cross-distro install support** — expand `install.sh` beyond Arch/CachyOS so aid works out-of-the-box on mainstream Linux distros (Ubuntu/Debian, Fedora/RHEL, Alpine, Arch) and macOS. Currently the only managed dependency is `python-pynvim` via `pacman`; every other prerequisite is assumed present, which is false on stock Ubuntu/Fedora images.
+
+  **Full dependency audit:**
+
+  | Dependency | Role | Arch | Ubuntu/Debian | Fedora/RHEL | macOS |
+  |------------|------|------|--------------|-------------|-------|
+  | `tmux ≥ 3.2` | core | `pacman -S tmux` | `apt install tmux` (≥3.2 on 22.04+) | `dnf install tmux` | `brew install tmux` |
+  | `nvim ≥ 0.9` | editor | `pacman -S neovim` | **blocker**: 24.04 ships 0.9.5 ✅; 22.04 ships 0.6 ❌ — needs PPA (`ppa:neovim-ppa/unstable`) or AppImage | `dnf install neovim` (0.9+ on F38+) | `brew install neovim` |
+  | `python3-pynvim` | treemux cwd tracking (Python scripts call pynvim) | `pacman -S python-pynvim` ✅ done | `apt install python3-neovim` or `pip3 install pynvim` | `pip3 install pynvim` | `pip3 install pynvim` |
+  | `lsof` | `watch_and_update.sh` reads cwd via `lsof -a -d cwd -p <pid>` | pre-installed | `apt install lsof` (often missing on minimal images) | pre-installed | pre-installed |
+  | `node` + `npm` | opencode runtime; `markdown-preview.nvim` build step | `pacman -S nodejs npm` | `apt install nodejs npm` (or nvm) | `dnf install nodejs npm` | `brew install node` |
+  | `git` | repo clone, TPM, lazy.nvim bootstrap | pre-installed | pre-installed | pre-installed | pre-installed (Xcode CLT) |
+  | `curl` | `boot.sh` bootstrapper | pre-installed | pre-installed | pre-installed | pre-installed |
+
+  **Known hard cases:**
+  - **Ubuntu 22.04 LTS**: nvim 0.6 in the default repo is too old. The fix is either (a) add `ppa:neovim-ppa/unstable` automatically, or (b) download the official AppImage from GitHub releases and install to `~/.local/bin/nvim`. Option (b) is safer (no PPA trust/key ceremony) and works identically across all distros.
+  - **Alpine / minimal containers**: `lsof` absent; alternative is `readlink /proc/<pid>/cwd` (Linux-only, already commented out in `watch_and_update.sh`). Should use `/proc/` on Linux and `lsof` only as macOS fallback.
+  - **macOS**: `readlink -f` doesn't exist (BSD readlink); `lsof` is present; Homebrew required for tmux/nvim. macOS support is a separate sub-scope.
+  - **`/proc/` vs `lsof` in `watch_and_update.sh`**: the upstream script already has the `/proc/` path commented out. On Linux, `/proc/<pid>/cwd` is faster, needs no extra tool, and works on all distros. A one-line OS detection (`[[ "$OSTYPE" == linux* ]]`) would let us use `/proc/` on Linux and fall back to `lsof` on macOS.
+
+  **Proposed install.sh changes:**
+  1. Add a `_detect_distro()` function returning `arch | debian | fedora | alpine | macos | unknown`.
+  2. Add a `_require <cmd> [install-hint]` helper that checks `command -v` and prints a clear error with distro-specific install instructions if missing — rather than silently failing mid-install.
+  3. Replace the bare `pacman`-only `python-pynvim` block with a distro-dispatch block covering all four Linux families + macOS.
+  4. Add pre-flight checks (before TPM/lazy bootstrap) for `tmux`, `nvim`, `git`, `node`, `lsof` — abort with actionable message if any are missing or below minimum version.
+  5. For nvim < 0.9 on Debian/Ubuntu: offer to install the official AppImage into `~/.local/bin/nvim` automatically.
+  6. In `watch_and_update.sh`: switch cwd detection to `readlink /proc/<pid>/cwd` on Linux (no external tool), `lsof` only on macOS.
+
+  **Scope boundary**: aid does not become a full package manager or attempt to install opencode (it has its own installer). The goal is: on a stock Ubuntu 24.04 / Fedora 40 / Arch image with only `git`, `curl`, and the system package manager available, `bash boot.sh` should produce a working aid session without manual intervention. macOS (Homebrew) is a stretch goal for this task; track separately if needed.
 
 ## Phase 2 — Differentiate (architectural upgrades)
 

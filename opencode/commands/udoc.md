@@ -75,13 +75,25 @@ Move every item in the `## Closed` section that is **referenced nowhere in any c
 
 ---
 
-## Step 5 — Prune outdated info
+## Step 5 — Prune outdated info and verify cross-links
 
 After archiving, scan the documentation for:
 
 - References to archived items (now gone from main docs) — remove or replace with a note: `(see archive)`
 - ADRs in `DECISIONS.md` that are marked `*(superseded by ADR-NNN)*` and are also referenced nowhere else — move them to `aid/docs/archive/DECISIONS-<YYYY-MM>.md`.
 - Any wording that describes a plan, intention, or TODO that has since been implemented — replace with the factual description of the implemented behaviour.
+
+### Bug ↔ Roadmap cross-link audit
+
+Check that every open bug which has a roadmap entry is correctly cross-linked in both directions:
+
+1. **BUGS.md / bugs/*.md → ROADMAP.md**: each open bug that is tracked as a roadmap item must reference its `T-NNN` number. Add a `**Roadmap**: [T-NNN](../ROADMAP.md)` line to the bug entry in `BUGS.md` (inline, next to the status line) if one is missing.
+
+2. **ROADMAP.md → bugs/*.md**: each roadmap task that was derived from a bug must link to the bug detail file. The format is already established: `(see [bugs/BUG-NNN.md](bugs/BUG-NNN.md))` at the end of the task description. Add this link if it is absent.
+
+3. **New open bugs without a roadmap entry**: for each open bug in `BUGS.md` that has no corresponding `T-NNN` in `ROADMAP.md`, decide whether it warrants tracking. Bugs that affect all users or have a clear proposed fix generally do. Add a roadmap task in the appropriate phase and apply the cross-links above. Assign the next unused `T-NNN`.
+
+Do not create roadmap entries for closed bugs unless their "final solution" section describes an architectural change that is still unimplemented.
 
 ---
 

@@ -47,7 +47,7 @@ local function _refresh_treemux_sidebar()
 
   -- ensure_treemux.sh stores: "<sidebar_pane_id>,<args>"
   local raw = vim.fn.system(
-    "tmux -L tdl show-option -gqv '@-treemux-registered-pane-" .. tmux_pane .. "'"
+    "tmux -L aid show-option -gqv '@-treemux-registered-pane-" .. tmux_pane .. "'"
   ):gsub("%s+$", "")
   if raw == "" then return end
 
@@ -56,12 +56,12 @@ local function _refresh_treemux_sidebar()
 
   -- Verify the pane actually exists before sending
   local exists = vim.fn.system(
-    "tmux -L tdl list-panes -F '#{pane_id}' | grep -qF '" .. sidebar_pane .. "' && echo 1 || echo 0"
+    "tmux -L aid list-panes -F '#{pane_id}' | grep -qF '" .. sidebar_pane .. "' && echo 1 || echo 0"
   ):gsub("%s+$", "")
   if exists ~= "1" then return end
 
   vim.fn.jobstart({
-    "tmux", "-L", "tdl", "send-keys", "-t", sidebar_pane,
+    "tmux", "-L", "aid", "send-keys", "-t", sidebar_pane,
     ":lua require('aidignore').reset()\r", "",
   })
 end
@@ -96,9 +96,9 @@ function M.reload()
   vim.schedule(function()
     -- 1. Reload tmux config (runs in background, non-blocking)
     if vim.env.TMUX and vim.env.TMUX ~= "" then
-      local tdl_dir = vim.env.TDL_DIR or ""
-      if tdl_dir ~= "" then
-        vim.fn.jobstart({ "tmux", "-L", "tdl", "source-file", tdl_dir .. "/tmux.conf" })
+      local aid_dir = vim.env.AID_DIR or ""
+      if aid_dir ~= "" then
+        vim.fn.jobstart({ "tmux", "-L", "aid", "source-file", aid_dir .. "/tmux.conf" })
       end
     end
 

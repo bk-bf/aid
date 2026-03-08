@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # aid.sh — main entry point. Symlinked into ~/.local/bin/aid by install.sh.
 #
-# Isolation: aid runs on its own tmux server socket (-L tdl) with its own
-# config (-f), and launches nvim as NVIM_APPNAME=nvim-tdl so it never
+# Isolation: aid runs on its own tmux server socket (-L aid) with its own
+# config (-f), and launches nvim as NVIM_APPNAME=nvim-aid so it never
 # touches the user's ~/.config/nvim or existing tmux sessions.
 #
 # Usage:
@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # Always resolves correctly because this file is executed, not sourced.
-TDL_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+AID_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 
 # ── Debug mode ───────────────────────────────────────────────────────────────
 # Consume -d/--debug before the main case so it composes with other flags.
@@ -42,9 +42,9 @@ dbg() { [[ "$AID_DEBUG" -eq 1 ]] && echo "[aid:debug] $*" >&2 || true; }
 attach_or_switch() {
   dbg "attach_or_switch: target=$1 TMUX=${TMUX:-<unset>}"
   if [[ -n "${TMUX:-}" ]]; then
-    tmux -L tdl switch-client -t "$1"
+    tmux -L aid switch-client -t "$1"
   else
-    tmux -L tdl attach -t "$1"
+    tmux -L aid attach -t "$1"
   fi
 }
 
@@ -66,7 +66,7 @@ EOF
     exit
     ;;
   -l|--list)
-    tmux -L tdl list-sessions 2>/dev/null || echo "no aid sessions"
+    tmux -L aid list-sessions 2>/dev/null || echo "no aid sessions"
     exit
     ;;
   -a|--attach)
@@ -77,7 +77,7 @@ EOF
       exit
     fi
     # aid -a with no name — interactive list
-    mapfile -t _sessions < <(tmux -L tdl list-sessions -F "#{session_name}" 2>/dev/null)
+    mapfile -t _sessions < <(tmux -L aid list-sessions -F "#{session_name}" 2>/dev/null)
     if [[ ${#_sessions[@]} -eq 0 ]]; then
       echo "no aid sessions running"
       exit 1
@@ -118,16 +118,16 @@ base=$(basename "$launch_dir" | sed 's/^\.*//' | tr -cs '[:alnum:]-_' '-' | sed 
 [[ -z "$base" ]] && base="dev"
 session="aid@$base"
 n=2
-while tmux -L tdl has-session -t "$session" 2>/dev/null; do
+while tmux -L aid has-session -t "$session" 2>/dev/null; do
   session="aid@${base}${n}"
   (( n++ ))
 done
 dbg "session=$session"
 
-# Parse .aidignore (walks up from launch_dir) and build TDL_IGNORE=comma,separated,list.
+# Parse .aidignore (walks up from launch_dir) and build AID_IGNORE=comma,separated,list.
 # If no .aidignore is found anywhere, create an empty one in launch_dir so the
 # file watcher in nvim has a file to watch from the start.
-TDL_IGNORE=""
+AID_IGNORE=""
 _aidignore_file=""
 _dir="$launch_dir"
 for _i in $(seq 1 20); do
@@ -144,31 +144,31 @@ if [[ -z "$_aidignore_file" ]]; then
   _aidignore_file="$launch_dir/.aidignore"
 fi
 if [[ -n "$_aidignore_file" ]]; then
-  TDL_IGNORE=$(grep -v '^\s*#' "$_aidignore_file" | grep -v '^\s*$' | paste -sd ',' || true)
+  AID_IGNORE=$(grep -v '^\s*#' "$_aidignore_file" | grep -v '^\s*$' | paste -sd ',' || true)
 fi
-export TDL_IGNORE
-dbg "aidignore=$_aidignore_file TDL_IGNORE=${TDL_IGNORE:-<empty>}"
+export AID_IGNORE
+dbg "aidignore=$_aidignore_file AID_IGNORE=${AID_IGNORE:-<empty>}"
 
 # Start the aid-isolated tmux server with its own config
 dbg "starting tmux session"
-tmux -L tdl -f "$TDL_DIR/tmux.conf" new-session -d -s "$session" \
+tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "$session" \
   -x "$(tput cols)" -y "$(tput lines)"
 
-# Export TDL_DIR, TDL_IGNORE, and OPENCODE_CONFIG_DIR into the server environment
+# Export AID_DIR, AID_IGNORE, and OPENCODE_CONFIG_DIR into the server environment
 # so all panes inherit them. OPENCODE_CONFIG_DIR isolates opencode to aid's own
 # config dir (commands/, package.json) instead of ~/.config/opencode/.
-tmux -L tdl set-environment -g TDL_DIR "$TDL_DIR"
-tmux -L tdl set-environment -g TDL_IGNORE "$TDL_IGNORE"
-tmux -L tdl set-environment -g OPENCODE_CONFIG_DIR "$TDL_DIR/opencode"
+tmux -L aid set-environment -g AID_DIR "$AID_DIR"
+tmux -L aid set-environment -g AID_IGNORE "$AID_IGNORE"
+tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
 # NVIM_APPNAME in the server environment means every pane shell inherits it —
 # no dependency on the send-keys command being delivered intact.
-tmux -L tdl set-environment -g NVIM_APPNAME "nvim-tdl"
-# TDL_NVIM_SOCKET must be set before ensure_treemux.sh runs so the sidebar nvim
+tmux -L aid set-environment -g NVIM_APPNAME "nvim-aid"
+# AID_NVIM_SOCKET must be set before ensure_treemux.sh runs so the sidebar nvim
 # inherits it at startup and sets g:nvim_tree_remote_socket_path correctly.
 # Socket path inherits the aid@<name> session name — @ is legal in UNIX socket paths
 # and in /tmp filenames. If a tool ever chokes on it, the socket path is the first place to check.
-nvim_socket="/tmp/tdl-nvim-${session}.sock"
-tmux -L tdl set-environment -g TDL_NVIM_SOCKET "$nvim_socket"
+nvim_socket="/tmp/aid-nvim-${session}.sock"
+tmux -L aid set-environment -g AID_NVIM_SOCKET "$nvim_socket"
 dbg "nvim_socket=$nvim_socket"
 
 # IDE layout sizes — all pane geometry owned here, not scattered in tmux.conf
@@ -181,7 +181,7 @@ dbg "nvim_socket=$nvim_socket"
 # Timeout after 10 s to avoid hanging forever if treemux fails to initialise.
 dbg "waiting for treemux init (@treemux-key-Tab)"
 _treemux_deadline=$(( SECONDS + 10 ))
-until tmux -L tdl show-option -gqv @treemux-key-Tab 2>/dev/null | grep -q .; do
+until tmux -L aid show-option -gqv @treemux-key-Tab 2>/dev/null | grep -q .; do
   if (( SECONDS >= _treemux_deadline )); then
     echo "aid: warning: treemux did not set @treemux-key-Tab within 10 s, continuing anyway" >&2
     break
@@ -191,24 +191,24 @@ done
 dbg "treemux ready (elapsed ~$(( SECONDS - (_treemux_deadline - 10) )) s)"
 
 # Find the initial (only) pane and capture its stable ID before any splits.
-editor_pane_id=$(tmux -L tdl list-panes -t "$session" -F "#{pane_id}" | head -1)
+editor_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id}" | head -1)
 dbg "editor_pane_id=$editor_pane_id"
 
 # Split right: opencode occupies 29% of width, spawned directly into opencode
 # (no shell prompt — avoids zsh intercept, send-keys mangling, autocorrect).
 dbg "splitting opencode pane"
-tmux -L tdl split-window -h -p 29 -t "$editor_pane_id" \
-  "OPENCODE_CONFIG_DIR=$(printf '%q' "$TDL_DIR/opencode") opencode $(printf '%q' "$launch_dir")"
-opencode_pane_id=$(tmux -L tdl list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
+tmux -L aid split-window -h -p 29 -t "$editor_pane_id" \
+  "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") opencode $(printf '%q' "$launch_dir")"
+opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
   | sort -k2 -n | tail -1 | cut -d' ' -f1)
 dbg "opencode_pane_id=$opencode_pane_id"
-tmux -L tdl select-pane -t "$editor_pane_id"
+tmux -L aid select-pane -t "$editor_pane_id"
 
 # Open treemux sidebar: run-shell -t executes inside the aid server with $TMUX
 # and $TMUX_PANE set, which toggle.sh's bare tmux calls require.
 # Pane IDs are stable — treemux inserting the sidebar won't shift them.
 dbg "running ensure_treemux.sh"
-tmux -L tdl run-shell -t "$editor_pane_id" "$TDL_DIR/ensure_treemux.sh"
+tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/ensure_treemux.sh"
 
 # Respawn the editor pane directly into the nvim restart loop — bypasses the
 # interactive shell entirely so zsh autocorrect / send-keys mangling can't fire.
@@ -216,8 +216,8 @@ tmux -L tdl run-shell -t "$editor_pane_id" "$TDL_DIR/ensure_treemux.sh"
 # immediately restarts it on the same socket.
 # To kill the session entirely: close the tmux window or run `aid kill`.
 dbg "respawning editor pane into nvim loop"
-tmux -L tdl respawn-pane -k -t "$editor_pane_id" \
-  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); NVIM_APPNAME=nvim-tdl nvim --listen $(printf '%q' "$nvim_socket"); done"
+tmux -L aid respawn-pane -k -t "$editor_pane_id" \
+  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); NVIM_APPNAME=nvim-aid nvim --listen $(printf '%q' "$nvim_socket"); done"
 
 dbg "attaching to session=$session"
 attach_or_switch "$session"

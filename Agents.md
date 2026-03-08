@@ -30,7 +30,7 @@ aid/                            ← bare git repo root
 │   │   ├── lazy-lock.json      # plugin lockfile
 │   │   └── lua/
 │   │       ├── sync.lua        # central git-sync coordinator (see below)
-│   │       └── aidignore.lua   # reads TDL_IGNORE env var, returns patterns for nvim-tree + Telescope
+│   │       └── aidignore.lua   # reads AID_IGNORE env var, returns patterns for nvim-tree + Telescope
 │   ├── nvim-treemux/
 │   │   ├── treemux_init.lua    # isolated nvim config for sidebar (NVIM_APPNAME=nvim-treemux)
 │   │   └── watch_and_update.sh # custom fork — cd-follows root on any cd, not just exit
@@ -49,30 +49,24 @@ aid/                            ← bare git repo root
 
 aid is fully isolated from the user's existing nvim and tmux setup. Nothing is shared.
 
-> **Note on naming**: aid was rebranded from `tdl`. Most internal infrastructure
-> still uses the `tdl` identifier — the tmux socket (`-L tdl`), env vars
-> (`TDL_DIR`, `TDL_IGNORE`, `TDL_NVIM_SOCKET`), `NVIM_APPNAME=nvim-tdl`, config
-> dir (`~/.config/nvim-tdl`), and socket paths (`/tmp/tdl-nvim-*.sock`). Do not
-> rename these — they are internal identifiers, not user-facing, and changing them
-> would break running sessions and installed symlinks.
 
 | Component | Isolation mechanism |
 |---|---|
-| tmux | Dedicated server socket: `tmux -L tdl -f <TDL_DIR>/tmux.conf` |
-| main nvim | `NVIM_APPNAME=nvim-tdl` → config at `~/.config/nvim-tdl → aid/nvim/` |
+| tmux | Dedicated server socket: `tmux -L aid -f <AID_DIR>/tmux.conf` |
+| main nvim | `NVIM_APPNAME=nvim-aid` → config at `~/.config/nvim-aid → aid/nvim/` |
 | sidebar nvim | `NVIM_APPNAME=nvim-treemux` → config at `~/.config/nvim-treemux/` |
-| opencode | `OPENCODE_CONFIG_DIR=$TDL_DIR/opencode` → `aid/opencode/`, not `~/.config/opencode` |
+| opencode | `OPENCODE_CONFIG_DIR=$AID_DIR/opencode` → `aid/opencode/`, not `~/.config/opencode` |
 | install.sh | Does **not** inject into `~/.config/tmux/.tmux.conf` or `~/.bashrc` |
 | aid.sh | Standalone script in `~/.local/bin/aid` — no shell function injection |
 
-`~/.config/nvim` is never touched. All `tmux` calls in scripts use `tmux -L tdl`.
+`~/.config/nvim` is never touched. All `tmux` calls in scripts use `tmux -L aid`.
 
 ## Symlink map (created by install.sh)
 
 | Repo path | Symlinked to |
 |---|---|
 | `aid.sh` | `~/.local/bin/aid` |
-| `nvim/` | `~/.config/nvim-tdl` |
+| `nvim/` | `~/.config/nvim-aid` |
 | `nvim-treemux/treemux_init.lua` | `~/.config/nvim-treemux/treemux_init.lua` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/nvim-treemux/watch_and_update.sh` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/tmux/plugins/treemux/scripts/tree/watch_and_update.sh` |
@@ -87,14 +81,14 @@ All pane geometry is owned in `aliases.sh → aid()`. Nothing in `tmux.conf` set
 
 | Pane | Width | How set |
 |---|---|---|
-| treemux sidebar (left) | 21 cols | `tmux -L tdl set-option @treemux-tree-width 21` |
+| treemux sidebar (left) | 21 cols | `tmux -L aid set-option @treemux-tree-width 21` |
 | editor (middle) | remainder | implicit |
-| opencode (right) | 28% of total | `tmux -L tdl split-window -h -p 29` + `ensure_treemux.sh` resize |
+| opencode (right) | 28% of total | `tmux -L aid split-window -h -p 29` + `ensure_treemux.sh` resize |
 
 ## Key behaviours
 
-- `aid` (no args): creates `nvim@<dirname>` session on the `tdl` tmux socket (`tmux -L tdl`); opens `NVIM_APPNAME=nvim-tdl nvim` in middle, opencode in right, treemux sidebar via `ensure_treemux.sh`.
-- `aid <name>`: attaches to an existing named session on the `tdl` tmux socket.
+- `aid` (no args): creates `nvim@<dirname>` session on the `aid` tmux socket (`tmux -L aid`); opens `NVIM_APPNAME=nvim-aid nvim` in middle, opencode in right, treemux sidebar via `ensure_treemux.sh`.
+- `aid <name>`: attaches to an existing named session on the `aid` tmux socket.
 - On fresh launch (no file arg), nvim opens `cheatsheet.md` as a styled read-only welcome buffer. Opening any file auto-dismisses it. `<leader>?` reopens it.
 - netrw is fully disabled (`loaded_netrw = 1`); nvim-tree handles all file browsing.
 - `showtabline = 2` — bufferline tab bar always visible from launch.
@@ -109,10 +103,10 @@ Central coordination point for post-branch-switch refresh. Prevents stale state 
 1. `silent! checktime` — reload buffers changed on disk
 2. `gitsigns.refresh()` — re-read HEAD, recompute hunk signs + branch name
 3. `nvim-tree.api.tree.reload()` — full tree rebuild + git status
-4. `tmux -L tdl send-keys` to treemux sidebar → `:NvimTreeRefresh`
+4. `tmux -L aid send-keys` to treemux sidebar → `:NvimTreeRefresh`
 
 `sync.reload()` — full workspace reload, bound to `<leader>R`:
-1. `tmux -L tdl source-file <TDL_DIR>/tmux.conf`
+1. `tmux -L aid source-file <AID_DIR>/tmux.conf`
 2. `source $MYVIMRC`
 3. `sync.sync()`
 
@@ -129,10 +123,10 @@ Central coordination point for post-branch-switch refresh. Prevents stale state 
 
 - **Persistent sidebar**: separate `NVIM_APPNAME=nvim-treemux` nvim instance — never closes on focus loss, tracks any `cd` via custom `watch_and_update.sh`.
 - **Git-sync coordinator**: `sync.lua` refreshes all git-aware components after branch switches — gitsigns, nvim-tree, treemux sidebar, buffers.
-- **Cross-project bookmarks**: `~/.local/share/nvim-tdl/global_bookmarks` — works across unrelated directories, unlike Harpoon (project-scoped). `<leader>ba/bd/bb`.
+- **Cross-project bookmarks**: `~/.local/share/nvim-aid/global_bookmarks` — works across unrelated directories, unlike Harpoon (project-scoped). `<leader>ba/bd/bb`.
 - **Unified statusline**: `vim-tpipeline` exports nvim statusline to the tmux status bar, visible across all panes.
 - **Lazygit worktree fix**: `<leader>gg` uses `git rev-parse --git-dir` (not `--git-common-dir`) to set `GIT_DIR`/`GIT_WORK_TREE` — correct for bare-repo worktrees.
-- **Full environment isolation**: dedicated `tmux -L tdl` server + `NVIM_APPNAME=nvim-tdl`. Zero conflict with existing nvim/tmux config.
+- **Full environment isolation**: dedicated `tmux -L aid` server + `NVIM_APPNAME=nvim-aid`. Zero conflict with existing nvim/tmux config.
 
 ## Main nvim plugins
 

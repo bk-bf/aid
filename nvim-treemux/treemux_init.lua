@@ -3,19 +3,19 @@
 vim.env.GIT_CONFIG_GLOBAL = ""
 
 -- Add main nvim/lua to package.path so shared modules (aidignore, sync) are available.
--- TDL_DIR is exported into the tmux server environment by aid.sh.
-local tdl_dir = os.getenv("TDL_DIR") or ""
-if tdl_dir ~= "" then
-  package.path = tdl_dir .. "/nvim/lua/?.lua;" .. package.path
+-- AID_DIR is exported into the tmux server environment by aid.sh.
+local aid_dir = os.getenv("AID_DIR") or ""
+if aid_dir ~= "" then
+  package.path = aid_dir .. "/nvim/lua/?.lua;" .. package.path
 end
 
 -- Point nvim-tree-remote at the editor nvim's socket.
--- aid.sh stores the socket path in the tmux server environment as TDL_NVIM_SOCKET
--- (e.g. /tmp/tdl-nvim-nvim@myproject.sock) and the editor nvim is launched with
+-- aid.sh stores the socket path in the tmux server environment as AID_NVIM_SOCKET
+-- (e.g. /tmp/aid-nvim-nvim@myproject.sock) and the editor nvim is launched with
 -- `nvim --listen <that path>`. Setting this global bypasses the auto-detection in
 -- tmux_current_window_nvim_addr.sh, which only works when the socket filename
 -- contains the nvim PID — something a fixed/predictable path won't satisfy.
-vim.g.nvim_tree_remote_socket_path = os.getenv("TDL_NVIM_SOCKET") or ""
+vim.g.nvim_tree_remote_socket_path = os.getenv("AID_NVIM_SOCKET") or ""
 
 -- Remove the white status bar below
 vim.o.laststatus = 0
@@ -48,7 +48,7 @@ local function nvim_tree_on_attach(bufnr)
   -- nvim_tree_remote checks node.type == "file" and falls back to local open for symlinks
   -- (type == "link"). Wrap tabnew to force symlinks through the remote path via absolute_path.
   -- The editor pane always runs nvim (aid.sh uses a restart loop), so the socket at
-  -- TDL_NVIM_SOCKET is always live. The fallback split in nvim_tree_remote is disabled
+  -- AID_NVIM_SOCKET is always live. The fallback split in nvim_tree_remote is disabled
   -- (pane = nil) so a dead socket produces a clear error instead of a rogue new pane.
   local function tabnew_follow_symlinks()
     local node = api.tree.get_node_under_cursor()
@@ -194,11 +194,11 @@ require("lazy").setup({
           side = "left",
         },
         filters = {
-          -- Initial filters from TDL_IGNORE env (set by aid.sh at session start).
+          -- Initial filters from AID_IGNORE env (set by aid.sh at session start).
           -- aidignore.watch() below takes over for live updates after startup.
           custom = (function()
             local t = { ".git" }
-            local env = os.getenv("TDL_IGNORE") or ""
+            local env = os.getenv("AID_IGNORE") or ""
             for entry in env:gmatch("[^,]+") do
               entry = entry:match("^%s*(.-)%s*$")
               if entry ~= "" then table.insert(t, entry) end
@@ -210,8 +210,8 @@ require("lazy").setup({
         },
       })
       -- Start watching .aidignore for live filter updates via ignore_list mutation.
-      -- Requires TDL_DIR/nvim/lua on package.path (set at top of this file).
-      if tdl_dir ~= "" then
+      -- Requires AID_DIR/nvim/lua on package.path (set at top of this file).
+      if aid_dir ~= "" then
         local ok, ai = pcall(require, "aidignore")
         if ok then ai.watch() end
       end

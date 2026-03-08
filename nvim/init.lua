@@ -75,9 +75,9 @@ local sync = require("sync")
 -- CHEATSHEET
 -- ============================================================
 -- Opens nvim/cheatsheet.md as a normal file buffer on startup. Re-open: <leader>?
--- Use TDL_DIR (real path) rather than stdpath("config") (symlink) so nvim tracks
+-- Use AID_DIR (real path) rather than stdpath("config") (symlink) so nvim tracks
 -- the canonical inode — avoids W13 "file created after editing started" on writes.
-local _cs_path = (vim.env.TDL_DIR or vim.fn.stdpath("config")) .. "/nvim/cheatsheet.md"
+local _cs_path = (vim.env.AID_DIR or vim.fn.stdpath("config")) .. "/nvim/cheatsheet.md"
 
 local function _cs_open()
   vim.cmd("edit " .. vim.fn.fnameescape(_cs_path))

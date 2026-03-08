@@ -12,7 +12,7 @@ Terminal IDE built on tmux + Neovim + [Opencode](https://opencode.ai). Three per
 curl -fsSL https://raw.githubusercontent.com/bk-bf/aid/master/boot.sh | bash
 ```
 
-Installs to `~/.local/share/aid`. Override: `TDL_DIR=~/aid curl ...`
+Installs to `~/.local/share/aid`. Override: `AID_DIR=~/aid curl ...`
 
 Re-running is safe — idempotent.
 

@@ -3,7 +3,7 @@
 ## Phase 1 — Harden (fix before any promotion)
 
 - [x] **T-001**: Replace `sleep 1.5` in `aid.sh` with a poll loop — `until tmux -L tdl show-option -gqv @treemux-key-Tab | grep -q .; do sleep 0.1; done` with a timeout escape hatch; current fixed sleep races on slow machines / high-latency SSH
-- [ ] **T-002**: Complete `tdl` → `aid` rename across the backend — ~104 token replacements across 7 files in a single coordinated commit; touch points: `TDL_DIR` → `AID_DIR`, `TDL_IGNORE` → `AID_IGNORE`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `tmux -L tdl` → `tmux -L aid`, `NVIM_APPNAME=nvim-tdl` → `nvim-aid`, `~/.config/nvim-tdl` → `~/.config/nvim-aid`, local var `TDL`/`tdl_dir` → `AID`/`aid_dir`, temp session `_tdl_install` → `_aid_install`, socket path `/tmp/tdl-nvim-*` → `/tmp/aid-nvim-*`; files: `aid.sh`, `install.sh`, `boot.sh`, `nvim/init.lua`, `nvim/lua/sync.lua`, `nvim-treemux/treemux_init.lua`, `README.md`
+- [x] **T-002**: Complete `tdl` → `aid` rename across the backend — ~104 token replacements across 7 files in a single coordinated commit; touch points: `TDL_DIR` → `AID_DIR`, `TDL_IGNORE` → `AID_IGNORE`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `tmux -L tdl` → `tmux -L aid`, `NVIM_APPNAME=nvim-tdl` → `nvim-aid`, `~/.config/nvim-tdl` → `~/.config/nvim-aid`, local var `TDL`/`tdl_dir` → `AID`/`aid_dir`, temp session `_tdl_install` → `_aid_install`, socket path `/tmp/tdl-nvim-*` → `/tmp/aid-nvim-*`; files: `aid.sh`, `install.sh`, `boot.sh`, `nvim/init.lua`, `nvim/lua/sync.lua`, `nvim-treemux/treemux_init.lua`, `README.md`
 - [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
 - [ ] **T-004**: Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?)
 

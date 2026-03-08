@@ -8,6 +8,15 @@
 
 ## Phase 2 — Differentiate (architectural upgrades)
 
+- [ ] **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
+  - `mason.nvim` — binary package manager (~700 packages: LSP servers, DAP adapters, linters, formatters); `:Mason` UI; `ensure_installed` for declarative setup; one-liner `require("mason").setup()`
+  - `mason-lspconfig.nvim` — bridges mason ↔ `nvim-lspconfig`; `automatic_enable = true` wires installed LSP servers to the correct filetypes with zero per-server boilerplate (Neovim 0.11+ native `vim.lsp.config` API)
+  - `conform.nvim` — formatter runner; one line per language in `formatters_by_ft`; applies results as a minimal diff (preserves cursor/folds); `format_on_save` one-liner; mason-installed binaries found automatically via PATH
+  - `nvim-lint` — linter runner; one line per language in `linters_by_ft`; reports via `vim.diagnostic`; requires one BufWritePost autocmd (not auto-created by the plugin)
+  - `nvim-dap` + `nvim-dap-ui` + `mason-nvim-dap` — debugger layer; `mason-nvim-dap` with `handlers = {}` provides working default adapter + launch configs for common languages (Python/debugpy, Node/vscode-js-debug, etc.); nvim-dap-ui auto-opens on session start; keymaps for continue/step/breakpoint
+  - **Scope boundary**: aid wires these plugins together with sensible defaults and pre-configured keymaps. It does not attempt to provide zero-config per-project debugging (virtualenv paths, source maps, attach configs are inherently project-specific and belong in per-project `.nvim.lua` or `launch.json`). The seam aid smooths is "none of these tools are installed or connected" → "they are installed, connected, and have sane keymaps". The remaining per-project tuning is user-land.
+  - **Known rough edge**: Python debugging — debugpy installed by mason runs in mason's own venv, not the project venv. Users must point `dap.configurations.python[n].pythonPath` at their project interpreter. Document this prominently rather than attempting a fragile auto-detect.
+
 - [ ] Upgrade sidebar sync to RPC — replace `tmux send-keys :NvimTreeRefresh` with `vim.fn.sockconnect` to sidebar's `$NVIM` socket; current send-keys path silently injects keystrokes if user is typing in the sidebar, risking file corruption
 - [ ] Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
 - [ ] Rename `TDL_` namespace to `AID_` — `TDL_DIR` → `AID_DIR`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `TDL_IGNORE` → `AID_IGNORE`, tmux socket `-L tdl` → `-L aid`, `NVIM_APPNAME nvim-tdl` → `nvim-aid`; do as a single coordinated commit to avoid mixed state

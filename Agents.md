@@ -2,7 +2,7 @@
 
 ## Agent rules
 
-- **Never commit or push to git unprompted.** Always wait for the user to explicitly ask, or for a slash command (e.g. `/commit`) to trigger it.
+- **Never commit or push to git unprompted.** Always wait for the user to explicitly ask, or for a slash command (e.g. `/commit`) to trigger it. This applies even when completing a large task — finish all code changes, then stop and wait. The user may have staged changes of their own that must not be conflated into your commit.
 - **Roadmap task references**: open tasks in `docs/ROADMAP.md` are numbered `T-NNN` (e.g. `T-002`). When referencing a roadmap item in code comments, ADRs, bug notes, or commit messages, use the task number, not a description.
 
 ## What this repo is
@@ -22,7 +22,7 @@ aid/                            ← bare git repo root
 │   ├── install.sh              # one-shot setup: TPM, treemux, symlinks, headless nvim bootstrap
 │   ├── aid.sh                  # main entry point — symlinked to ~/.local/bin/aid by install.sh
 │   ├── tmux.conf               # loaded via -f on the dedicated tmux server socket
-│   ├── ensure_treemux.sh       # idempotent sidebar opener; symlinked to ~/.config/tmux/ensure_treemux.sh
+│   ├── ensure_treemux.sh       # idempotent sidebar opener; enforces 3-pane layout proportions
 │   ├── .aidignore              # patterns hidden from nvim-tree and Telescope (parsed by aid.sh at launch)
 │   ├── nvim/
 │   │   ├── init.lua            # main nvim config (plugins, LSP, keymaps, options, autocmds)
@@ -53,8 +53,8 @@ aid is fully isolated from the user's existing nvim and tmux setup. Nothing is s
 | Component | Isolation mechanism |
 |---|---|
 | tmux | Dedicated server socket: `tmux -L aid -f <AID_DIR>/tmux.conf` |
-| main nvim | `XDG_CONFIG_HOME=~/.config/aid` + `NVIM_APPNAME=nvim` → config at `~/.config/aid/nvim → aid/nvim/` |
-| sidebar nvim | `XDG_CONFIG_HOME=~/.config/aid` + `NVIM_APPNAME=treemux` → config at `~/.config/aid/treemux → aid/nvim-treemux/` |
+| main nvim | `XDG_CONFIG_HOME=$AID_DIR` + `NVIM_APPNAME=nvim` → config at `$AID_DIR/nvim` (no symlink needed) |
+| sidebar nvim | `XDG_CONFIG_HOME=$AID_DIR` + `NVIM_APPNAME=treemux` — treemux resolves to `~/.config/aid/treemux` symlink → `aid/nvim-treemux/` |
 | opencode | `OPENCODE_CONFIG_DIR=$AID_DIR/opencode` → `aid/opencode/`, not `~/.config/opencode` |
 | install.sh | Does **not** inject into `~/.config/tmux/.tmux.conf` or `~/.bashrc` |
 | aid.sh | Standalone script in `~/.local/bin/aid` — no shell function injection |
@@ -66,28 +66,27 @@ aid is fully isolated from the user's existing nvim and tmux setup. Nothing is s
 | Repo path | Symlinked to |
 |---|---|
 | `aid.sh` | `~/.local/bin/aid` |
-| `nvim/` | `~/.config/aid/nvim` |
 | `nvim-treemux/` | `~/.config/aid/treemux` |
 | `nvim-treemux/watch_and_update.sh` | `~/.config/tmux/plugins/treemux/scripts/tree/watch_and_update.sh` |
 | `ensure_treemux.sh` | `~/.config/tmux/ensure_treemux.sh` |
 
-`aid.sh` is a standalone script in PATH (not sourced). `tmux.conf` is loaded via `-f` on the dedicated server socket (not sourced from the user's tmux config).
+`aid.sh` is a standalone script in PATH (not sourced). `tmux.conf` is loaded via `-f` on the dedicated server socket (not sourced from the user's tmux config). Main nvim (`NVIM_APPNAME=nvim`) resolves config directly to `$AID_DIR/nvim` via `XDG_CONFIG_HOME=$AID_DIR` — no symlink in `~/.config/` required.
 
 ## Pane layout and sizes
 
-All pane geometry is owned in `aliases.sh → aid()`. Nothing in `tmux.conf` sets sizes.
+All pane geometry is owned in `aid.sh`. Nothing in `tmux.conf` sets sizes.
 `ensure_treemux.sh` enforces the opencode pane width after the sidebar opens.
 
 | Pane | Width | How set |
 |---|---|---|
-| treemux sidebar (left) | 21 cols | `tmux -L aid set-option @treemux-tree-width 21` |
+| treemux sidebar (left) | 26 cols | `@treemux-tree-width 26` in `tmux.conf` |
 | editor (middle) | remainder | implicit |
 | opencode (right) | 28% of total | `tmux -L aid split-window -h -p 29` + `ensure_treemux.sh` resize |
 
 ## Key behaviours
 
-- `aid` (no args): creates `nvim@<dirname>` session on the `aid` tmux socket (`tmux -L aid`); opens `NVIM_APPNAME=nvim nvim` in middle, opencode in right, treemux sidebar via `ensure_treemux.sh`.
-- `aid <name>`: attaches to an existing named session on the `aid` tmux socket.
+- `aid` (no args): creates `aid@<dirname>` session on the `aid` tmux socket (`tmux -L aid`); opens `NVIM_APPNAME=nvim nvim` in middle, opencode in right, treemux sidebar via `ensure_treemux.sh`.
+- `aid -a <name>`: attaches to an existing named session on the `aid` tmux socket.
 - On fresh launch (no file arg), nvim opens `cheatsheet.md` as a styled read-only welcome buffer. Opening any file auto-dismisses it. `<leader>?` reopens it.
 - netrw is fully disabled (`loaded_netrw = 1`); nvim-tree handles all file browsing.
 - `showtabline = 2` — bufferline tab bar always visible from launch.
@@ -102,7 +101,7 @@ Central coordination point for post-branch-switch refresh. Prevents stale state 
 1. `silent! checktime` — reload buffers changed on disk
 2. `gitsigns.refresh()` — re-read HEAD, recompute hunk signs + branch name
 3. `nvim-tree.api.tree.reload()` — full tree rebuild + git status
-4. `tmux -L aid send-keys` to treemux sidebar → `:NvimTreeRefresh`
+4. `tmux -L aid send-keys` to treemux sidebar → `:lua require('aidignore').reset()`
 
 `sync.reload()` — full workspace reload, bound to `<leader>R`:
 1. `tmux -L aid source-file <AID_DIR>/tmux.conf`
@@ -114,18 +113,18 @@ Central coordination point for post-branch-switch refresh. Prevents stale state 
 - `TermClose` autocmd (lazygit float closes)
 - Explicit call after `vim.cmd("LazyGit")` in `<leader>gg` keybind
 
-**Sidebar pane lookup**: reads tmux option `@-treemux-registered-pane-$TMUX_PANE` (written by `ensure_treemux.sh`). TODO: compare with nvim-tree-remote RPC approach (`transport.exec()` already maintains a msgpack-RPC channel between the two nvim instances).
+**Sidebar pane lookup**: reads tmux option `@-treemux-registered-pane-$TMUX_PANE` (written by `ensure_treemux.sh`).
 
 **Treemux self-heal** (`treemux_init.lua`): `FileChangedShell` sets `vim.v.fcs_choice = "reload"` (suppresses blocking prompt) + rebuilds nvim-tree. `FileChangedShellPost` does `silent! checktime` + rebuild.
 
 ## Unique features
 
-- **Persistent sidebar**: separate `NVIM_APPNAME=treemux` nvim instance — never closes on focus loss, tracks any `cd` via custom `watch_and_update.sh`.
+- **Persistent sidebar**: separate `NVIM_APPNAME=treemux` nvim instance in its own tmux pane — tmux-level isolation means no nvim terminal/split can bleed into it; tracks any `cd` via custom `watch_and_update.sh`.
 - **Git-sync coordinator**: `sync.lua` refreshes all git-aware components after branch switches — gitsigns, nvim-tree, treemux sidebar, buffers.
 - **Cross-project bookmarks**: `~/.local/share/aid/nvim/global_bookmarks` — works across unrelated directories, unlike Harpoon (project-scoped). `<leader>ba/bd/bb`.
 - **Unified statusline**: `vim-tpipeline` exports nvim statusline to the tmux status bar, visible across all panes.
 - **Lazygit worktree fix**: `<leader>gg` uses `git rev-parse --git-dir` (not `--git-common-dir`) to set `GIT_DIR`/`GIT_WORK_TREE` — correct for bare-repo worktrees.
-- **Full environment isolation**: dedicated `tmux -L aid` server + `XDG_CONFIG_HOME=~/.config/aid`. Zero conflict with existing nvim/tmux config.
+- **Full environment isolation**: dedicated `tmux -L aid` server + `XDG_CONFIG_HOME=$AID_DIR`. Zero conflict with existing nvim/tmux config.
 
 ## Main nvim plugins
 

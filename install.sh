@@ -5,11 +5,10 @@
 # Isolation guarantee
 # ───────────────────
 # aid never touches ~/.config/nvim or ~/.config/tmux/.tmux.conf.
-# All aid config is centralised under ~/.config/aid/:
-#   ~/.config/aid/nvim      → aid/nvim/         (main editor, NVIM_APPNAME=nvim)
-#   ~/.config/aid/treemux   → aid/nvim-treemux/ (sidebar,     NVIM_APPNAME=treemux)
-# XDG_CONFIG_HOME=$HOME/.config/aid is set in the tmux server env so every nvim
-# process in an aid session reads from there automatically.
+# Main editor config is resolved directly at launch time:
+#   XDG_CONFIG_HOME=$AID_DIR, NVIM_APPNAME=nvim → $AID_DIR/nvim (no symlink)
+# Sidebar still uses a symlink (treemux lives outside $AID_DIR):
+#   ~/.config/aid/treemux → aid/nvim-treemux/ (sidebar, NVIM_APPNAME=treemux)
 # tmux runs on a dedicated server socket (tmux -L aid) with -f pointing directly
 # at aid/tmux.conf, so the user's existing tmux setup is never loaded or modified.
 set -euo pipefail
@@ -51,16 +50,14 @@ else
 fi
 
 # ── 4. Symlinks ───────────────────────────────────────────────────────────────
+# The main editor (NVIM_APPNAME=nvim) no longer needs a symlink: aid.sh sets
+# XDG_CONFIG_HOME=$AID_DIR at launch time, so nvim resolves its config directly
+# to $AID_DIR/nvim — no entry in ~/.config/aid/ required.
+#
+# The sidebar (NVIM_APPNAME=treemux) still needs a symlink because nvim-treemux/
+# lives in its own shipped location and is not co-located with $AID.
 echo "==> Creating symlinks under $AID_CONFIG ..."
 mkdir -p "$AID_CONFIG"
-
-# ~/.config/aid/nvim → aid/nvim/  (main editor — XDG_CONFIG_HOME=~/.config/aid, NVIM_APPNAME=nvim)
-if [[ -d "$AID_CONFIG/nvim" && ! -L "$AID_CONFIG/nvim" ]]; then
-  echo "  WARNING: $AID_CONFIG/nvim is a real directory — backing up to $AID_CONFIG/nvim.bak"
-  mv "$AID_CONFIG/nvim" "$AID_CONFIG/nvim.bak"
-fi
-ln -sfn "$AID/nvim" "$AID_CONFIG/nvim"
-echo "  $AID_CONFIG/nvim -> $AID/nvim"
 
 # ~/.config/aid/treemux/ → aid/nvim-treemux/  (sidebar — NVIM_APPNAME=treemux)
 if [[ -d "$AID_CONFIG/treemux" && ! -L "$AID_CONFIG/treemux" ]]; then
@@ -94,7 +91,7 @@ _spin "syncing treemux plugins…" $_nvim_pid
 wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
 
 echo "==> Bootstrapping main nvim plugins (lazy sync)..."
-XDG_CONFIG_HOME="$AID_CONFIG" NVIM_APPNAME=nvim nvim --headless "+Lazy! sync" +qa 2>/dev/null &
+XDG_CONFIG_HOME="$AID" NVIM_APPNAME=nvim nvim --headless "+Lazy! sync" +qa 2>/dev/null &
 _nvim_pid=$!
 _spin "syncing nvim plugins…" $_nvim_pid
 wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"

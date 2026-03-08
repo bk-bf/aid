@@ -2,11 +2,10 @@
 # aid.sh — main entry point. Symlinked into ~/.local/bin/aid by install.sh.
 #
 # Isolation: aid runs on its own tmux server socket (-L aid) with its own
-# config (-f), and sets XDG_CONFIG_HOME=$HOME/.config/aid so nvim reads from
-# there. NVIM_APPNAME=nvim resolves to ~/.config/aid/nvim.
+# config (-f), and sets XDG_CONFIG_HOME=$HOME/.config/aid so both nvim instances
+# read from there. NVIM_APPNAME=nvim (main editor) and NVIM_APPNAME=treemux
+# (sidebar) resolve to ~/.config/aid/nvim and ~/.config/aid/treemux.
 # The user's ~/.config/nvim and existing tmux sessions are never touched.
-#
-# Layout: two tmux panes — editor (nvim with nvim-tree split inside) | opencode.
 #
 # Usage:
 #   aid                       launch new session in current directory
@@ -168,16 +167,32 @@ tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
 # NVIM_APPNAME in the server environment means every pane shell inherits it —
 # no dependency on the send-keys command being delivered intact.
 tmux -L aid set-environment -g NVIM_APPNAME "nvim"
-
-# nvim socket path — used by the editor restart loop so nvim is always reachable
-# at a stable path (e.g. for external tooling or future RPC use).
-# @ is legal in UNIX socket paths and /tmp filenames.
+# AID_NVIM_SOCKET must be set before ensure_treemux.sh runs so the sidebar nvim
+# inherits it at startup and sets g:nvim_tree_remote_socket_path correctly.
+# Socket path inherits the aid@<name> session name — @ is legal in UNIX socket paths
+# and in /tmp filenames. If a tool ever chokes on it, the socket path is the first place to check.
 nvim_socket="/tmp/aid-nvim-${session}.sock"
+tmux -L aid set-environment -g AID_NVIM_SOCKET "$nvim_socket"
 dbg "nvim_socket=$nvim_socket"
 
-# IDE layout sizes — two panes: editor (nvim, nvim-tree split inside) | opencode.
+# IDE layout sizes — all pane geometry owned here, not scattered in tmux.conf
+# sidebar=21 cols set in tmux.conf (must be before sidebar.tmux runs);
 # opencode=29% of total width; editor gets the remainder.
-# No layout correction needed — no sidebar insertion shifts the proportions.
+
+# Wait for sidebar.tmux to finish setting @treemux-key-Tab.
+# Poll instead of a fixed sleep so we proceed as soon as the plugin is ready
+# (fast on local, still correct on slow machines / high-latency SSH).
+# Timeout after 10 s to avoid hanging forever if treemux fails to initialise.
+dbg "waiting for treemux init (@treemux-key-Tab)"
+_treemux_deadline=$(( SECONDS + 10 ))
+until tmux -L aid show-option -gqv @treemux-key-Tab 2>/dev/null | grep -q .; do
+  if (( SECONDS >= _treemux_deadline )); then
+    echo "aid: warning: treemux did not set @treemux-key-Tab within 10 s, continuing anyway" >&2
+    break
+  fi
+  sleep 0.1
+done
+dbg "treemux ready (elapsed ~$(( SECONDS - (_treemux_deadline - 10) )) s)"
 
 # Find the initial (only) pane and capture its stable ID before any splits.
 editor_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id}" | head -1)
@@ -192,6 +207,12 @@ opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_le
   | sort -k2 -n | tail -1 | cut -d' ' -f1)
 dbg "opencode_pane_id=$opencode_pane_id"
 tmux -L aid select-pane -t "$editor_pane_id"
+
+# Open treemux sidebar: run-shell -t executes inside the aid server with $TMUX
+# and $TMUX_PANE set, which toggle.sh's bare tmux calls require.
+# Pane IDs are stable — treemux inserting the sidebar won't shift them.
+dbg "running ensure_treemux.sh"
+tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/ensure_treemux.sh"
 
 # Respawn the editor pane directly into the nvim restart loop — bypasses the
 # interactive shell entirely so zsh autocorrect / send-keys mangling can't fire.

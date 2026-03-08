@@ -1,7 +1,7 @@
 -- aidignore.lua — reads the nearest .aidignore from disk (walking up from cwd)
 -- and returns pattern tables for nvim-tree and Telescope. Watches the file for
--- changes and re-applies filters to both nvim-tree and Telescope automatically
--- when it is saved. If no .aidignore is found, no patterns are applied.
+-- changes and re-applies filters to nvim-tree automatically when it is saved.
+-- If no .aidignore is found, no patterns are applied and all files are shown.
 --
 -- Usage:
 --   local aidignore = require("aidignore")
@@ -122,35 +122,6 @@ local function _apply_to_nvimtree()
   if ok_sync then pcall(s.sync) end
 end
 
--- Update Telescope's live file_ignore_patterns without calling setup() again.
---
--- PRIVATE API DEPENDENCY:
---   require("telescope.config").values.file_ignore_patterns
---   Type: list of Lua pattern strings.
---   Read on every picker invocation inside Telescope's file filtering path.
---   Direct assignment takes effect on the very next Telescope call — equivalent
---   to telescope.setup({ defaults = { file_ignore_patterns = ... } }) but without
---   the overhead of re-running set_defaults for every other config key.
---
---   Stability: config.values has been the authoritative runtime config store since
---   telescope.nvim's initial architecture; config.set_defaults() writes into this
---   exact table and it is referenced throughout telescope's internals.
-local function _apply_to_telescope()
-  local ok, cfg = pcall(require, "telescope.config")
-  if not ok then return end
-  local base = { "^%.git[/\\]" }
-  for _, p in ipairs(M.patterns().telescope) do
-    table.insert(base, p)
-  end
-  cfg.values.file_ignore_patterns = base
-end
-
--- Apply current .aidignore patterns to all consumers (nvim-tree + Telescope).
-local function _apply_all()
-  _apply_to_nvimtree()
-  _apply_to_telescope()
-end
-
 -- Returns { raw = {...}, telescope = {...} }
 function M.patterns()
   if _cache then return _cache end
@@ -164,13 +135,6 @@ end
 
 -- Start (or restart) watching the .aidignore closest to cwd.
 -- Called after nvim-tree setup and on DirChanged.
---
--- NOTE: nvim saves files via atomic rename on Linux (backupcopy=auto → rename
--- mode): it writes to a temp file then renames it over the original. This
--- replaces the inode, so the inotify watch on the old inode fires once and is
--- then dead — the new file has no watcher. We work around this by calling
--- M.watch() again inside the callback to re-attach to the new inode after
--- every save.
 function M.watch()
   if _watcher then
     pcall(function() _watcher:stop() end)
@@ -187,20 +151,18 @@ function M.watch()
   handle:start(path, {}, vim.schedule_wrap(function(err, _, _)
     if err then return end
     _cache = nil
-    _apply_all()
-    M.watch()  -- re-attach: atomic rename replaced the inode, old watch is dead
+    _apply_to_nvimtree()
   end))
 
   _watcher = handle
   _watched = path
 end
 
--- Bust cache, re-apply filters to all consumers (nvim-tree + Telescope), and
--- restart watcher for current cwd. Call from DirChanged autocmd and after
--- workspace reload.
+-- Bust cache, re-apply filters to nvim-tree, and restart watcher for current cwd.
+-- Call from DirChanged autocmd and after workspace reload.
 function M.reset()
   _cache = nil
-  _apply_all()
+  _apply_to_nvimtree()
   M.watch()
 end
 

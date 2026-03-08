@@ -1,10 +1,21 @@
 nvim-treemux/lazy-lock.json
 opencode/node_modules/
 
+# ── nvim runtime (lands in $AID_DIR/nvim/ only on stale installs; real target
+# is ~/.local/share|state|cache/aid/nvim/ — kept here as a safety net) ────────
+nvim/site/
+nvim/undo/
+
+# ── tmux generated files ──────────────────────────────────────────────────────
+# palette.conf is written at session start by gen-tmux-palette.sh — not source
+tmux/palette.conf
+
 # ── bun runtime ──────────────────────────────────────────────────────────────
 .bun/
 
 # ── opencode runtime ─────────────────────────────────────────────────────────
+opencode/.gitignore
+opencode/bin/
 opencode/log/
 opencode/opencode.db
 opencode/opencode.db-shm

@@ -65,6 +65,11 @@ vim.opt.laststatus = 0
 vim.opt.showtabline = 2
 
 -- ============================================================
+-- PALETTE (single source of truth for all aid colors)
+-- ============================================================
+local p = require("palette")
+
+-- ============================================================
 -- GIT-SYNC COORDINATOR
 -- ============================================================
 -- Central module that refreshes all git-aware components after an external
@@ -291,9 +296,9 @@ function _G.setup_statusline()
 
         -- Dynamic separator colors based on current mode highlight
         local ok, minfo = pcall(vim.api.nvim_get_hl, 0, { name = mode_hl, link = false })
-        local mode_bg = (ok and minfo.bg) and string.format("#%06x", minfo.bg) or "#b57bee"
-        vim.api.nvim_set_hl(0, "StatusSepModeToDevinfo",  { fg = mode_bg,   bg = "#6181C6" })
-        vim.api.nvim_set_hl(0, "StatusSepFileinfoToMode", { fg = "#6181C6", bg = mode_bg   })
+        local mode_bg = (ok and minfo.bg) and string.format("#%06x", minfo.bg) or p.purple
+        vim.api.nvim_set_hl(0, "StatusSepModeToDevinfo",  { fg = mode_bg, bg = p.blue })
+        vim.api.nvim_set_hl(0, "StatusSepFileinfoToMode", { fg = p.blue,  bg = mode_bg })
 
         local arrow = "\xee\x82\xb0" -- U+E0B0 Powerline right arrow 
         local sep = function(hl) return string.format("%%#%s#%s", hl, arrow) end
@@ -408,37 +413,37 @@ require("lazy").setup({
         diagnostics     = "nvim_lsp",
       },
       highlights = {
-        fill                      = { bg = "#C88E6B" },
-        background                = { fg = "#ffffff", bg = "#C88E6B" },
-        tab                       = { fg = "#ffffff", bg = "#C88E6B" },
-        tab_selected              = { fg = "#ffffff", bg = "#a06a45", bold = true },
-        tab_separator             = { fg = "#C88E6B", bg = "#C88E6B" },
-        tab_separator_selected    = { fg = "#a06a45", bg = "#a06a45" },
-        tab_close                 = { fg = "#ffffff", bg = "#C88E6B" },
-        separator                 = { fg = "#C88E6B", bg = "#C88E6B" },
-        separator_selected        = { fg = "#a06a45", bg = "#a06a45" },
-        separator_visible         = { fg = "#C88E6B", bg = "#C88E6B" },
-        buffer_selected           = { fg = "#ffffff", bg = "#a06a45", bold = true },
-        buffer_visible            = { fg = "#ffffff", bg = "#C88E6B" },
-        close_button              = { fg = "#ffffff", bg = "#C88E6B" },
-        close_button_selected     = { fg = "#ffffff", bg = "#a06a45" },
-        close_button_visible      = { fg = "#ffffff", bg = "#C88E6B" },
-        modified                  = { fg = "#ffffff", bg = "#C88E6B" },
-        modified_selected         = { fg = "#ffffff", bg = "#a06a45" },
-        modified_visible          = { fg = "#ffffff", bg = "#C88E6B" },
-        duplicate                 = { fg = "#ffffff", bg = "#C88E6B" },
-        duplicate_selected        = { fg = "#ffffff", bg = "#a06a45" },
-        duplicate_visible         = { fg = "#ffffff", bg = "#C88E6B" },
-        indicator_selected        = { fg = "#a06a45", bg = "#a06a45" },
-        indicator_visible         = { fg = "#C88E6B", bg = "#C88E6B" },
-        numbers                   = { fg = "#ffffff", bg = "#C88E6B" },
-        numbers_selected          = { fg = "#ffffff", bg = "#a06a45" },
-        numbers_visible           = { fg = "#ffffff", bg = "#C88E6B" },
-        diagnostic                = { fg = "#ffffff", bg = "#C88E6B" },
-        diagnostic_selected       = { fg = "#ffffff", bg = "#a06a45" },
-        diagnostic_visible        = { fg = "#ffffff", bg = "#C88E6B" },
-        trunc_marker              = { fg = "#ffffff", bg = "#C88E6B" },
-        offset_separator          = { fg = "#C88E6B", bg = "#C88E6B" },
+        fill                      = { bg = p.tab_bg },
+        background                = { fg = p.tab_fg, bg = p.tab_bg },
+        tab                       = { fg = p.tab_fg, bg = p.tab_bg },
+        tab_selected              = { fg = p.tab_fg, bg = p.tab_sel, bold = true },
+        tab_separator             = { fg = p.tab_bg, bg = p.tab_bg },
+        tab_separator_selected    = { fg = p.tab_sel, bg = p.tab_sel },
+        tab_close                 = { fg = p.tab_fg, bg = p.tab_bg },
+        separator                 = { fg = p.tab_bg, bg = p.tab_bg },
+        separator_selected        = { fg = p.tab_sel, bg = p.tab_sel },
+        separator_visible         = { fg = p.tab_bg, bg = p.tab_bg },
+        buffer_selected           = { fg = p.tab_fg, bg = p.tab_sel, bold = true },
+        buffer_visible            = { fg = p.tab_fg, bg = p.tab_bg },
+        close_button              = { fg = p.tab_fg, bg = p.tab_bg },
+        close_button_selected     = { fg = p.tab_fg, bg = p.tab_sel },
+        close_button_visible      = { fg = p.tab_fg, bg = p.tab_bg },
+        modified                  = { fg = p.tab_fg, bg = p.tab_bg },
+        modified_selected         = { fg = p.tab_fg, bg = p.tab_sel },
+        modified_visible          = { fg = p.tab_fg, bg = p.tab_bg },
+        duplicate                 = { fg = p.tab_fg, bg = p.tab_bg },
+        duplicate_selected        = { fg = p.tab_fg, bg = p.tab_sel },
+        duplicate_visible         = { fg = p.tab_fg, bg = p.tab_bg },
+        indicator_selected        = { fg = p.tab_sel, bg = p.tab_sel },
+        indicator_visible         = { fg = p.tab_bg, bg = p.tab_bg },
+        numbers                   = { fg = p.tab_fg, bg = p.tab_bg },
+        numbers_selected          = { fg = p.tab_fg, bg = p.tab_sel },
+        numbers_visible           = { fg = p.tab_fg, bg = p.tab_bg },
+        diagnostic                = { fg = p.tab_fg, bg = p.tab_bg },
+        diagnostic_selected       = { fg = p.tab_fg, bg = p.tab_sel },
+        diagnostic_visible        = { fg = p.tab_fg, bg = p.tab_bg },
+        trunc_marker              = { fg = p.tab_fg, bg = p.tab_bg },
+        offset_separator          = { fg = p.tab_bg, bg = p.tab_bg },
       },
     },
     keys = {
@@ -710,20 +715,76 @@ require("lazy").setup({
 -- ============================================================
 -- APPEARANCE
 -- ============================================================
-vim.api.nvim_set_hl(0, "Normal", { bg = "none" })
-vim.api.nvim_set_hl(0, "NormalFloat", { bg = "none" })
-vim.api.nvim_set_hl(0, "GitSignsAdd",      { fg = "#50fa7b" })
-vim.api.nvim_set_hl(0, "GitSignsDelete",   { fg = "#ff5555" })
-vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { bg = "#3d1a1a" })
-vim.api.nvim_set_hl(0, "GitSignsChange",   { fg = "#ffaa00" })
-vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = "#3d2a00" })
-vim.api.nvim_set_hl(0, "Cursor", { fg = "#000000", bg = "#b57bee" })
-vim.api.nvim_set_hl(0, "MiniStatuslineDevinfo",  { fg = "#ffffff", bg = "#6181C6" })
-vim.api.nvim_set_hl(0, "MiniStatuslineFilename",  { fg = "#ffffff", bg = "#A284C6" })
-vim.api.nvim_set_hl(0, "MiniStatuslineFileinfo",  { fg = "#ffffff", bg = "#6181C6" })
-vim.api.nvim_set_hl(0, "MiniStatuslineInactive",  { fg = "#ffffff", bg = "#A284C6" })
-vim.api.nvim_set_hl(0, "StatusSepDevinfoToFilename", { fg = "#6181C6", bg = "#A284C6" })
-vim.opt.guicursor = "n-v-c:block-Cursor,i-ci-ve:ver25-Cursor"
+-- apply_palette() reads the current palette module and re-applies every
+-- highlight group that depends on it.  Called once at startup and again by
+-- sync.watch_palette() whenever palette.lua is saved — giving instant
+-- hot-reload without restarting aid.
+function _G.apply_palette()
+  -- Bust the module cache so require() picks up the saved file, not the old table.
+  package.loaded["palette"] = nil
+  local ok, fresh = pcall(require, "palette")
+  if not ok then
+    vim.notify("palette.lua error: " .. tostring(fresh), vim.log.levels.ERROR)
+    return
+  end
+  p = fresh  -- update the module-level variable used by setup_statusline()
+
+  vim.api.nvim_set_hl(0, "Normal",      { bg = p.none })
+  vim.api.nvim_set_hl(0, "NormalFloat", { bg = p.none })
+  vim.api.nvim_set_hl(0, "GitSignsAdd",      { fg = p.git_add })
+  vim.api.nvim_set_hl(0, "GitSignsDelete",   { fg = p.git_del })
+  vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { bg = p.git_del_ln })
+  vim.api.nvim_set_hl(0, "GitSignsChange",   { fg = p.git_chg })
+  vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = p.git_chg_ln })
+  vim.api.nvim_set_hl(0, "Cursor", { fg = p.cursor_fg, bg = p.purple })
+  vim.api.nvim_set_hl(0, "MiniStatuslineDevinfo",        { fg = p.fg, bg = p.blue })
+  vim.api.nvim_set_hl(0, "MiniStatuslineFilename",       { fg = p.fg, bg = p.lavender })
+  vim.api.nvim_set_hl(0, "MiniStatuslineFileinfo",       { fg = p.fg, bg = p.blue })
+  vim.api.nvim_set_hl(0, "MiniStatuslineInactive",       { fg = p.fg, bg = p.lavender })
+  vim.api.nvim_set_hl(0, "StatusSepDevinfoToFilename",   { fg = p.blue, bg = p.lavender })
+  vim.opt.guicursor = "n-v-c:block-Cursor,i-ci-ve:ver25-Cursor"
+
+  -- Re-apply bufferline highlights from updated palette.
+  -- bufferline.nvim exposes no runtime highlight update API, but overwriting
+  -- the highlight groups directly takes effect immediately on the next redraw.
+  local hl = vim.api.nvim_set_hl
+  hl(0, "BufferLineFill",                      { bg = p.tab_bg })
+  hl(0, "BufferLineBackground",                { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineTab",                       { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineTabSelected",               { fg = p.tab_fg, bg = p.tab_sel, bold = true })
+  hl(0, "BufferLineTabSeparator",              { fg = p.tab_bg, bg = p.tab_bg })
+  hl(0, "BufferLineTabSeparatorSelected",      { fg = p.tab_sel, bg = p.tab_sel })
+  hl(0, "BufferLineTabClose",                  { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineSeparator",                 { fg = p.tab_bg, bg = p.tab_bg })
+  hl(0, "BufferLineSeparatorSelected",         { fg = p.tab_sel, bg = p.tab_sel })
+  hl(0, "BufferLineSeparatorVisible",          { fg = p.tab_bg, bg = p.tab_bg })
+  hl(0, "BufferLineBufferSelected",            { fg = p.tab_fg, bg = p.tab_sel, bold = true })
+  hl(0, "BufferLineBufferVisible",             { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineCloseButton",               { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineCloseButtonSelected",       { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineCloseButtonVisible",        { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineModified",                  { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineModifiedSelected",          { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineModifiedVisible",           { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineDuplicate",                 { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineDuplicateSelected",         { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineDuplicateVisible",          { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineIndicatorSelected",         { fg = p.tab_sel, bg = p.tab_sel })
+  hl(0, "BufferLineIndicatorVisible",          { fg = p.tab_bg, bg = p.tab_bg })
+  hl(0, "BufferLineNumbers",                   { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineNumbersSelected",           { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineNumbersVisible",            { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineDiagnostic",                { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineDiagnosticSelected",        { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineDiagnosticVisible",         { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineTruncMarker",               { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineOffsetSeparator",           { fg = p.tab_bg, bg = p.tab_bg })
+
+  vim.cmd("redrawtabline")
+end
+
+-- Apply on startup
+apply_palette()
 
 -- ============================================================
 -- DIAGNOSTICS
@@ -809,6 +870,9 @@ vim.api.nvim_create_autocmd("VimEnter", {
     -- Watch the current buffer's directory for external edits (e.g. opencode).
     -- BufEnter handles subsequent file opens; VimLeave cleans up all handles.
     sync.watch_buf(data.buf)
+    -- Watch palette.lua so saving it hot-reloads all colors without restarting.
+    -- Registered once here; idempotent (watch_palette() stops any prior handle).
+    sync.watch_palette()
   end,
 })
 

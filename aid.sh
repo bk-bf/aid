@@ -110,6 +110,10 @@ esac
 
 # No flag — fall through to create a new session in current directory.
 
+# Regenerate tmux/palette.conf from nvim/lua/palette.lua before the server starts.
+# This keeps the tmux status bar in sync with the Lua palette without duplicating hex values.
+"$AID_DIR/gen-tmux-palette.sh"
+
 # Capture launch dir before tmux changes context
 launch_dir="$PWD"
 dbg "launch_dir=$launch_dir"

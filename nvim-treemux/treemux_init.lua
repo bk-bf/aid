@@ -188,7 +188,6 @@ require("lazy").setup({
     },
   },
   "kiyoon/nvim-tree-remote.nvim",
-  "folke/tokyonight.nvim",
   "nvim-tree/nvim-web-devicons",
   {
     "nvim-tree/nvim-tree.lua",
@@ -491,7 +490,26 @@ require("lazy").setup({
   },
 })
 
-vim.cmd([[ colorscheme tokyonight-night ]])
+-- ============================================================
+-- PALETTE & APPEARANCE
+-- ============================================================
+-- Load the shared aid palette so treemux uses the same color values as the
+-- main editor and the tmux status bar.  AID_DIR/nvim/lua is on package.path
+-- (set at the top of this file) so palette.lua is always reachable.
+local _palette_ok, p = pcall(require, "palette")
+if not _palette_ok then
+  -- Fallback table — keeps treemux functional even if AID_DIR is not set
+  p = {
+    purple = "#b57bee", blue = "#6181C6", lavender = "#A284C6",
+    fg = "#ffffff", cursor_fg = "#000000", none = "none",
+    git_add = "#50fa7b", git_del = "#ff5555", git_chg = "#ffaa00",
+  }
+end
+
+-- No external colorscheme — aid owns all colors via palette.lua.
+-- Apply a clean dark base so nvim-tree icons are readable against any terminal
+-- background, then punch out the panel background to terminal-transparent.
+vim.o.background = "dark"
 vim.o.cursorline = true
 
 -- Auto-focus tree root to current directory (hide parents)
@@ -501,12 +519,18 @@ vim.api.nvim_create_autocmd("DirChanged", {
   end,
 })
 
--- Apply transparency after colorscheme (must be last)
-vim.api.nvim_set_hl(0, "Normal",         { bg = "none" })
-vim.api.nvim_set_hl(0, "NormalFloat",    { bg = "none" })
-vim.api.nvim_set_hl(0, "NvimTreeNormal", { bg = "none" })
-vim.api.nvim_set_hl(0, "NvimTreeNormalNC", { bg = "none" })
-vim.api.nvim_set_hl(0, "NvimTreeEndOfBuffer", { bg = "none" })
+-- Apply transparency and palette-driven accent highlights (must be last)
+vim.api.nvim_set_hl(0, "Normal",                    { bg = p.none })
+vim.api.nvim_set_hl(0, "NormalFloat",               { bg = p.none })
+vim.api.nvim_set_hl(0, "NvimTreeNormal",            { bg = p.none })
+vim.api.nvim_set_hl(0, "NvimTreeNormalNC",          { bg = p.none })
+vim.api.nvim_set_hl(0, "NvimTreeEndOfBuffer",       { bg = p.none })
+vim.api.nvim_set_hl(0, "NvimTreeFolderName",        { fg = p.lavender })
+vim.api.nvim_set_hl(0, "NvimTreeOpenedFolderName",  { fg = p.purple, bold = true })
+vim.api.nvim_set_hl(0, "NvimTreeRootFolder",        { fg = p.blue,   bold = true })
+vim.api.nvim_set_hl(0, "NvimTreeGitNew",            { fg = p.git_add })
+vim.api.nvim_set_hl(0, "NvimTreeGitDeleted",        { fg = p.git_del })
+vim.api.nvim_set_hl(0, "NvimTreeGitDirty",          { fg = p.git_chg })
 
 -- ============================================================
 -- TREEMUX SELF-HEAL

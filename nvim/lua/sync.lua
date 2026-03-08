@@ -1,62 +1,6 @@
 -- sync.lua — central git-sync coordinator + full workspace reload
---
--- Four entry points:
---
---   require("sync").sync()
---     Full git-state refresh. Call only on events that signal external change.
---     Refreshes buffers (checktime), gitsigns, nvim-tree, and treemux sidebar.
---
---   require("sync").checktime()
---     Lightweight: checktime only, no sign-column or tree redraws.
---     Safe for high-frequency events (BufEnter, CursorHold) — no flicker.
---
---   require("sync").reload()
---     Full workspace reload triggered manually via <leader>R.
---     Reloads tmux config, nvim config, then calls sync() for state refresh.
---
---   require("sync").watch_buf([bufnr])
---     Watch the parent directory of the given buffer (default: current buffer)
---     for file changes using vim.uv.fs_event. On any change, fires sync()
---     automatically — opencode edits appear in nvim immediately, no pane switch
---     required. Idempotent: already-watched directories are skipped. Call on
---     BufEnter. vim.uv on Linux (inotify) only supports non-recursive watches,
---     so we watch per-buffer-directory rather than cwd recursively.
---
---   require("sync").stop_watchers()
---     Stop all active directory watchers. Call on VimLeave.
---
--- sync() is triggered by:
---   • FocusGained         — nvim regains focus after any external tool
---   • TermClose           — lazygit float closes
---   • explicit call       — post vim.cmd("LazyGit") in the <leader>gg keybind
---   • fs_event watcher    — watch_buf() fires sync() on any change in open buffer's directory
---
--- checktime() is triggered by:
---   • BufEnter/CursorHold — belt-and-suspenders for buffer reload only;
---                           does NOT run gitsigns/nvim-tree to avoid flicker
---
--- sync() is also triggered by:
---   • pane-focus-in hook  — tmux.conf fires `nvim --remote-send lua sync.sync()` into
---                           AID_NVIM_SOCKET on every pane switch; ensures buffers AND
---                           gitsigns line-change highlights update without requiring the
---                           user to physically focus the nvim pane (T-014/BUG-009)
---
--- Components refreshed by sync():
---   1. nvim buffers    — checktime (reloads files changed on disk)
---   2. gitsigns        — refresh() (re-reads HEAD, recomputes hunk signs)
---   3. nvim-tree       — tree.reload() (full tree + git status)
---   4. treemux sidebar — aidignore.reset() via direct msgpack-RPC (T-016/BUG-008)
---                        mutates explorer.filters.ignore_list in-place then
---                        reloads; no setup() re-call, no visual disruption.
---                        See aidignore.lua for private API notes and S2 fallback.
---
--- Treemux RPC (T-016):
---   treemux_init.lua writes its vim.v.servername into the tmux option
---   @-treemux-nvim-socket-<editor_pane_id> on VimEnter and removes it on
---   VimLeave. sync.lua reads that option, opens a sockconnect channel, and
---   calls nvim_exec_lua("require('aidignore').reset()").
---   This is silent and invisible in the treemux pane — no cmdline flash,
---   no send-keys keystrokes injected, no cross-pane redraw bleed (BUG-008).
+-- See docs/ARCHITECTURE.md § "Git-sync coordinator" for design rationale,
+-- trigger points, and the treemux RPC protocol.
 
 local M = {}
 
@@ -128,11 +72,16 @@ end
 -- Bound to <leader>R in init.lua.
 function M.reload()
   vim.schedule(function()
-    -- 1. Reload tmux config (runs in background, non-blocking)
+    -- 1. Regenerate tmux/palette.conf from palette.lua, then reload tmux config.
+    --    Done in a single jobstart so the source-file sees the fresh palette.
     if vim.env.TMUX and vim.env.TMUX ~= "" then
       local aid_dir = vim.env.AID_DIR or ""
       if aid_dir ~= "" then
-        vim.fn.jobstart({ "tmux", "-L", "aid", "source-file", aid_dir .. "/tmux.conf" })
+        vim.fn.jobstart(
+          aid_dir .. "/gen-tmux-palette.sh && tmux -L aid source-file " ..
+          vim.fn.shellescape(aid_dir .. "/tmux.conf"),
+          { detach = true }
+        )
       end
     end
 
@@ -150,6 +99,68 @@ function M.reload()
 
     vim.notify("workspace reloaded", vim.log.levels.INFO)
   end)
+end
+
+-- Watch palette.lua for changes and hot-reload all colors when it is saved.
+-- Called once on VimEnter from init.lua.
+--
+-- On change:
+--   1. apply_palette() — busts Lua module cache, re-requires palette, re-applies
+--      every nvim highlight group (statusline, bufferline, gitsigns, cursor).
+--   2. gen-tmux-palette.sh — re-reads palette.lua via Lua and rewrites
+--      tmux/palette.conf, then tmux source-file picks it up.
+--   3. vim-tpipeline re-renders the statusline on the next cursor move
+--      (no explicit trigger needed — highlight group changes are picked up
+--       automatically by the next statusline evaluation).
+--
+-- The watcher is file-level (watches the directory containing palette.lua and
+-- filters to only act on that filename), because vim.uv.fs_event on Linux
+-- (inotify) does not support watching a single file directly.
+function M.watch_palette()
+  local aid_dir = vim.env.AID_DIR or ""
+  if aid_dir == "" then return end
+
+  local palette_path = aid_dir .. "/nvim/lua/palette.lua"
+  local palette_dir  = aid_dir .. "/nvim/lua"
+
+  -- Avoid double-registering if reload() calls watch_palette() again
+  if _watchers["__palette__"] then
+    pcall(function() _watchers["__palette__"]:stop() end)
+    _watchers["__palette__"] = nil
+  end
+
+  local handle = vim.uv.new_fs_event()
+  if not handle then return end
+
+  local ok = pcall(function()
+    handle:start(palette_dir, {}, vim.schedule_wrap(function(err, filename, _)
+      if err then return end
+      -- filename may be nil on some platforms; guard and filter to palette.lua only
+      if filename and filename ~= "palette.lua" then return end
+
+      -- 1. Re-apply nvim highlights from updated palette
+      if type(_G.apply_palette) == "function" then
+        _G.apply_palette()
+      end
+
+      -- 2. Regenerate tmux palette and source it — run as shell pipeline so
+      --    source-file sees the newly written file.
+      if vim.env.TMUX and vim.env.TMUX ~= "" then
+        vim.fn.jobstart(
+          vim.fn.shellescape(aid_dir .. "/gen-tmux-palette.sh") ..
+          " && tmux -L aid source-file " ..
+          vim.fn.shellescape(aid_dir .. "/tmux/palette.conf"),
+          { detach = true }
+        )
+      end
+
+      vim.notify("palette reloaded", vim.log.levels.INFO)
+    end))
+  end)
+
+  if ok then
+    _watchers["__palette__"] = handle
+  end
 end
 
 -- Watch the parent directory of a buffer file.

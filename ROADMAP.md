@@ -2,13 +2,14 @@
 
 ## Phase 1 — Harden (fix before any promotion)
 
-- [ ] Replace `sleep 1.5` in `aid.sh` with a poll loop — `until tmux -L tdl show-option -gqv @treemux-key-Tab | grep -q .; do sleep 0.1; done` with a timeout escape hatch; current fixed sleep races on slow machines / high-latency SSH
-- [ ] Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
-- [ ] Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?)
+- [x] **T-001**: Replace `sleep 1.5` in `aid.sh` with a poll loop — `until tmux -L tdl show-option -gqv @treemux-key-Tab | grep -q .; do sleep 0.1; done` with a timeout escape hatch; current fixed sleep races on slow machines / high-latency SSH
+- [ ] **T-002**: Complete `tdl` → `aid` rename across the backend — ~104 token replacements across 7 files in a single coordinated commit; touch points: `TDL_DIR` → `AID_DIR`, `TDL_IGNORE` → `AID_IGNORE`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `tmux -L tdl` → `tmux -L aid`, `NVIM_APPNAME=nvim-tdl` → `nvim-aid`, `~/.config/nvim-tdl` → `~/.config/nvim-aid`, local var `TDL`/`tdl_dir` → `AID`/`aid_dir`, temp session `_tdl_install` → `_aid_install`, socket path `/tmp/tdl-nvim-*` → `/tmp/aid-nvim-*`; files: `aid.sh`, `install.sh`, `boot.sh`, `nvim/init.lua`, `nvim/lua/sync.lua`, `nvim-treemux/treemux_init.lua`, `README.md`
+- [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
+- [ ] **T-004**: Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?)
 
 ## Phase 2 — Differentiate (architectural upgrades)
 
-- [ ] **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
+- [ ] **T-005**: **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
   - `mason.nvim` — binary package manager (~700 packages: LSP servers, DAP adapters, linters, formatters); `:Mason` UI; `ensure_installed` for declarative setup; one-liner `require("mason").setup()`
   - `mason-lspconfig.nvim` — bridges mason ↔ `nvim-lspconfig`; `automatic_enable = true` wires installed LSP servers to the correct filetypes with zero per-server boilerplate (Neovim 0.11+ native `vim.lsp.config` API)
   - `conform.nvim` — formatter runner; one line per language in `formatters_by_ft`; applies results as a minimal diff (preserves cursor/folds); `format_on_save` one-liner; mason-installed binaries found automatically via PATH
@@ -17,20 +18,19 @@
   - **Scope boundary**: aid wires these plugins together with sensible defaults and pre-configured keymaps. It does not attempt to provide zero-config per-project debugging (virtualenv paths, source maps, attach configs are inherently project-specific and belong in per-project `.nvim.lua` or `launch.json`). The seam aid smooths is "none of these tools are installed or connected" → "they are installed, connected, and have sane keymaps". The remaining per-project tuning is user-land.
   - **Known rough edge**: Python debugging — debugpy installed by mason runs in mason's own venv, not the project venv. Users must point `dap.configurations.python[n].pythonPath` at their project interpreter. Document this prominently rather than attempting a fragile auto-detect.
 
-- [ ] Upgrade sidebar sync to RPC — replace `tmux send-keys :NvimTreeRefresh` with `vim.fn.sockconnect` to sidebar's `$NVIM` socket; current send-keys path silently injects keystrokes if user is typing in the sidebar, risking file corruption
-- [ ] Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
-- [ ] Rename `TDL_` namespace to `AID_` — `TDL_DIR` → `AID_DIR`, `TDL_NVIM_SOCKET` → `AID_NVIM_SOCKET`, `TDL_IGNORE` → `AID_IGNORE`, tmux socket `-L tdl` → `-L aid`, `NVIM_APPNAME nvim-tdl` → `nvim-aid`; do as a single coordinated commit to avoid mixed state
-- [ ] Add `aid update` command — git pull + re-run `install.sh`
+- [ ] **T-006**: Upgrade sidebar sync to RPC — replace `tmux send-keys :NvimTreeRefresh` with `vim.fn.sockconnect` to sidebar's `$NVIM` socket; current send-keys path silently injects keystrokes if user is typing in the sidebar, risking file corruption
+- [ ] **T-007**: Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
+- [ ] **T-008**: Add `aid update` command — git pull + re-run `install.sh`
 
 ## Phase 3 — Publicize
 
-- [ ] Opencode pane opt-in via flag (`aid --no-ai` skips opencode pane) — removes "requires opencode" adoption barrier
-- [ ] Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
+- [ ] **T-009**: Opencode pane opt-in via flag (`aid --no-ai` skips opencode pane) — removes "requires opencode" adoption barrier
+- [ ] **T-010**: Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
 
 ## Deferred / under consideration
 
-- [ ] Dev branch for bleeding-edge work
-- [ ] Consider `main` + feature-branches workflow (currently single `master`)
+- [ ] **T-011**: Dev branch for bleeding-edge work
+- [ ] **T-012**: Consider `main` + feature-branches workflow (currently single `master`)
 
 ## Done
 

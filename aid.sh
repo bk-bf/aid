@@ -175,9 +175,20 @@ dbg "nvim_socket=$nvim_socket"
 # sidebar=21 cols set in tmux.conf (must be before sidebar.tmux runs);
 # opencode=29% of total width; editor gets the remainder.
 
-# Wait for sidebar.tmux to finish setting @treemux-key-Tab
-dbg "sleeping for treemux init"
-sleep 1.5
+# Wait for sidebar.tmux to finish setting @treemux-key-Tab.
+# Poll instead of a fixed sleep so we proceed as soon as the plugin is ready
+# (fast on local, still correct on slow machines / high-latency SSH).
+# Timeout after 10 s to avoid hanging forever if treemux fails to initialise.
+dbg "waiting for treemux init (@treemux-key-Tab)"
+_treemux_deadline=$(( SECONDS + 10 ))
+until tmux -L tdl show-option -gqv @treemux-key-Tab 2>/dev/null | grep -q .; do
+  if (( SECONDS >= _treemux_deadline )); then
+    echo "aid: warning: treemux did not set @treemux-key-Tab within 10 s, continuing anyway" >&2
+    break
+  fi
+  sleep 0.1
+done
+dbg "treemux ready (elapsed ~$(( SECONDS - (_treemux_deadline - 10) )) s)"
 
 # Find the initial (only) pane and capture its stable ID before any splits.
 editor_pane_id=$(tmux -L tdl list-panes -t "$session" -F "#{pane_id}" | head -1)

@@ -46,7 +46,7 @@
   - **Known rough edge**: Python debugging — debugpy installed by mason runs in mason's own venv, not the project venv. Users must point `dap.configurations.python[n].pythonPath` at their project interpreter. Document this prominently rather than attempting a fragile auto-detect.
 
 - [ ] **T-007**: Self-contained theme system — aid owns its color palette; bufferline, statusbar, treemux, and opencode driven from a single source in the repo (no external theme dependency)
-- [ ] **T-008**: Add `aid update` command — git pull + re-run `install.sh`
+- [ ] **T-008**: Add `aid --update` command — git pull + re-run `install.sh`
 - [ ] **T-017**: Replace `lazygit.nvim` env-var integration with a raw terminal float — build the lazygit command directly (`lazygit -w <work_tree> -g <git_dir>`), never touch `GIT_DIR`/`GIT_WORK_TREE` env vars; eliminates BUG-006 class of env leaks permanently (see [bugs/BUG-006.md](bugs/BUG-006.md))
 
 ## Phase 3 — Publicize

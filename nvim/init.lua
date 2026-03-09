@@ -161,8 +161,8 @@ local function _bm_write(t)
   if not f then
     return
   end
-  for _, p in ipairs(t) do
-    f:write(p .. "\n")
+  for _, entry in ipairs(t) do
+    f:write(entry .. "\n")
   end
   f:close()
 end
@@ -303,7 +303,7 @@ vim.keymap.set("n", "<leader>gf", "<cmd>Telescope diagnostics bufnr=0<cr>", { de
 -- Spell
 -- <leader>sS — toggle spell (en) | <leader>se — English | <leader>sd — German | <leader>sn — off
 vim.keymap.set("n", "<leader>sS", function()
-  local on = not vim.opt_local.spell:get()
+  local on = not vim.wo.spell
   vim.opt_local.spell = on
   vim.opt_local.spelllang = "en"
   vim.notify("Spell: " .. (on and "on (en)" or "off"))

@@ -8,15 +8,6 @@
 
 ## Phase 2 — Differentiate (architectural upgrades)
 
-- [ ] **T-005**: **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
-  - `mason.nvim` — binary package manager (~700 packages: LSP servers, DAP adapters, linters, formatters); `:Mason` UI; `ensure_installed` for declarative setup; one-liner `require("mason").setup()`
-  - `mason-lspconfig.nvim` — bridges mason ↔ `nvim-lspconfig`; `automatic_enable = true` wires installed LSP servers to the correct filetypes with zero per-server boilerplate (Neovim 0.11+ native `vim.lsp.config` API)
-  - `conform.nvim` — formatter runner; one line per language in `formatters_by_ft`; applies results as a minimal diff (preserves cursor/folds); `format_on_save` one-liner; mason-installed binaries found automatically via PATH
-  - `nvim-lint` — linter runner; one line per language in `linters_by_ft`; reports via `vim.diagnostic`; requires one BufWritePost autocmd (not auto-created by the plugin)
-  - `nvim-dap` + `nvim-dap-ui` + `mason-nvim-dap` — debugger layer; `mason-nvim-dap` with `handlers = {}` provides working default adapter + launch configs for common languages (Python/debugpy, Node/vscode-js-debug, etc.); nvim-dap-ui auto-opens on session start; keymaps for continue/step/breakpoint
-  - **Scope boundary**: aid wires these plugins together with sensible defaults and pre-configured keymaps. It does not attempt to provide zero-config per-project debugging (virtualenv paths, source maps, attach configs are inherently project-specific and belong in per-project `.nvim.lua` or `launch.json`). The seam aid smooths is "none of these tools are installed or connected" → "they are installed, connected, and have sane keymaps". The remaining per-project tuning is user-land.
-  - **Known rough edge**: Python debugging — debugpy installed by mason runs in mason's own venv, not the project venv. Users must point `dap.configurations.python[n].pythonPath` at their project interpreter. Document this prominently rather than attempting a fragile auto-detect.
-
 - [ ] **T-008**: Add `aid --update` command — git pull + re-run `install.sh`
 - [ ] **T-017**: Replace `lazygit.nvim` env-var integration with a raw terminal float — build the lazygit command directly (`lazygit -w <work_tree> -g <git_dir>`), never touch `GIT_DIR`/`GIT_WORK_TREE` env vars; eliminates BUG-006 class of env leaks permanently (see [bugs/BUG-006.md](bugs/BUG-006.md))
 
@@ -36,6 +27,7 @@
 
 ## Done
 
+- [x] **2026-03-09**: T-005 — language tooling layer; mason.nvim (:Mason UI, ~700 packages), mason-lspconfig.nvim (automatic_enable bridges mason → lspconfig), conform.nvim (format_on_save, LSP fallback, `<leader>F`), nvim-lint (BufWritePost trigger), nvim-dap + nvim-dap-ui + mason-nvim-dap (auto-open UI, `handlers={}` default configs, full keymap set); no tools pre-installed — users install what they need via `:Mason`
 - [x] **2026-03-09**: T-023 / BUG-014 — `<Tab>` in treemux sidebar opens file inside sidebar pane; fixed: `<Tab>` remapped to `<Nop>` in `treemux_init.lua` after plugin setup
 - [x] **2026-03-09**: T-007 — self-contained theme system; palette centralized in `nvim/lua/palette.lua`; bufferline, statusline, treemux highlights, and tmux status bar all driven from single source; `tokyonight` dependency removed from treemux; `gen-tmux-palette.sh` renders tmux colors at session start
 - [x] **2026-03-09**: Audit `.aidignore` patterns in Telescope (`file_ignore_patterns` applied consistently?) — audit complete; revealed BUG-011 (Telescope patterns frozen at startup, not live-updated); fix tracked as T-021

@@ -6,6 +6,11 @@ set -euo pipefail
 
 AID="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AID_CONFIG="$HOME/.config/aid"
+TPM_DIR="$AID/tmux/plugins/tpm"
+TREEMUX_DIR="$AID/tmux/plugins/treemux"
+XDG_DATA_HOME="$HOME/.local/share/aid"
+XDG_STATE_HOME="$HOME/.local/state/aid"
+XDG_CACHE_HOME="$HOME/.cache/aid"
 
 echo "==> aid install starting from $AID"
 
@@ -17,7 +22,6 @@ if command -v pacman &>/dev/null; then
 fi
 
 # ── 2. TPM ───────────────────────────────────────────────────────────────────
-TPM_DIR="$AID/tmux/plugins/tpm"
 if [[ ! -d "$TPM_DIR" ]]; then
   echo "==> Installing TPM..."
   mkdir -p "$AID/tmux/plugins"
@@ -29,7 +33,6 @@ fi
 # ── 3. Treemux plugin ────────────────────────────────────────────────────────
 # Clone directly — TPM's headless install_plugins reads @plugin options from a
 # running tmux server and a bare server (no tmux.conf loaded) has none set.
-TREEMUX_DIR="$AID/tmux/plugins/treemux"
 if [[ ! -d "$TREEMUX_DIR" ]]; then
   echo "==> Installing treemux..."
   git clone https://github.com/kiyoon/treemux "$TREEMUX_DIR"
@@ -69,14 +72,14 @@ _spin() {
 }
 
 echo "==> Bootstrapping treemux sidebar plugins (lazy sync)..."
-XDG_CONFIG_HOME="$AID_CONFIG" XDG_DATA_HOME="$HOME/.local/share/aid" XDG_STATE_HOME="$HOME/.local/state/aid" XDG_CACHE_HOME="$HOME/.cache/aid" \
+XDG_CONFIG_HOME="$AID_CONFIG" XDG_DATA_HOME="$XDG_DATA_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
   NVIM_APPNAME=treemux nvim --headless "+Lazy! sync" +qa &
 _nvim_pid=$!
 _spin "syncing treemux plugins…" $_nvim_pid
 wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
 
 echo "==> Bootstrapping main nvim plugins (lazy sync)..."
-XDG_CONFIG_HOME="$AID" XDG_DATA_HOME="$HOME/.local/share/aid" XDG_STATE_HOME="$HOME/.local/state/aid" XDG_CACHE_HOME="$HOME/.cache/aid" \
+XDG_CONFIG_HOME="$AID" XDG_DATA_HOME="$XDG_DATA_HOME" XDG_STATE_HOME="$XDG_STATE_HOME" XDG_CACHE_HOME="$XDG_CACHE_HOME" \
   NVIM_APPNAME=nvim nvim --headless "+Lazy! sync" +qa &
 _nvim_pid=$!
 _spin "syncing nvim plugins…" $_nvim_pid

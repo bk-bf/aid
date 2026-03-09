@@ -54,7 +54,15 @@ Run:
 ls "$HOME/.local/share/aid/nvim/mason/bin/"
 ```
 
-Collect the list of binary names. Ignore non-LSP tools: `stylua`, `selene`, `prettier`, `black`, `shfmt`, `shellcheck`, `ruff`, `gofmt`, `rustfmt`. Everything else is an LSP binary.
+Collect the list of binary names.
+
+Ignore pure formatter/non-diagnostic tools: `stylua`, `prettier`, `black`, `shfmt`, `ruff`, `gofmt`, `rustfmt`. Everything else that is not an LSP binary and not a diagnostic tool falls through.
+
+Treat these separately as **diagnostic tools** (not wired into `opencode.json`, but noted for Step 4b):
+- `selene` — Lua linter
+- `shellcheck` — shell linter
+
+Everything else is an LSP binary — map it using the table below.
 
 For each LSP binary found, resolve the opencode server key using this mapping table:
 
@@ -154,6 +162,69 @@ Docs: https://opencode.ai/docs/lsp/
 
 ---
 
+## Step 4b — Bootstrap selene.toml (Lua projects only)
+
+Run this step only if **all three** conditions hold:
+- `selene` was found in Mason bin during Step 1
+- At least one `.lua` file exists anywhere in the project (check with `find . -name "*.lua" -not -path "*/mason/*" -not -path "*/lazy/*" -not -path "*/.git/*" | head -1`)
+- No `selene.toml` exists in the project root (`ls selene.toml` → not found)
+
+If `selene.toml` already exists, print:
+```
+selene.toml already present — left unchanged.
+```
+Then skip the rest of this step.
+
+If all conditions hold, print:
+
+```
+selene is installed and this project contains Lua files.
+Generate a selene.toml in the project root?
+
+  [1] Minimal — std = "luajit+vim", global_usage = "allow"
+  [2] Full Neovim preset — adds suppressions for mixed_table,
+      bad_string_escape, undefined_variable (common false positives
+      in Neovim Lua)
+  [n] Skip
+```
+
+Wait for the user's answer.
+
+If the user answers `n` or `N` or `skip`: print `selene.toml not generated.` and skip.
+
+If the user answers `1` or `minimal`: write the following to `selene.toml` in the project root:
+
+```toml
+std = "luajit+vim"
+
+[lints]
+# _G writes used for cross-module callbacks
+global_usage = "allow"
+```
+
+If the user answers `2` or `full`: write the following to `selene.toml` in the project root:
+
+```toml
+std = "luajit+vim"
+
+[lints]
+# _G writes used for cross-module callbacks
+global_usage = "allow"
+# lazy.nvim plugin specs mix list and keyed fields — intentional pattern
+mixed_table = "allow"
+# \xNN hex escapes are valid in LuaJIT but flagged by selene
+bad_string_escape = "allow"
+# forward-declared functions defined after first use in the same file
+undefined_variable = "allow"
+```
+
+After writing, print:
+```
+Generated selene.toml in project root (<choice> preset).
+```
+
+---
+
 # Diagnose mode
 
 You are here because either `$ARGUMENTS` is non-empty (specific file), or `$ARGUMENTS` is empty and `opencode.json` already has LSP config (all files).
@@ -225,15 +296,33 @@ Run each applicable tool. Collect all output. Do not stop on non-zero exit — l
 
 `lua-language-server --check` operates on a **directory**, not individual files. For each unique directory that contains `.lua` files in the target list, run:
 
+Before constructing the command, check for `.luarc.json` in the project root:
+
+```bash
+ls .luarc.json
+```
+
+- If found: always include `--configpath $(pwd)/.luarc.json` in the invocation.
+- If not found: omit `--configpath` entirely.
+
+Then run:
+
 ```bash
 LUALS_LOGDIR=$(mktemp -d /tmp/luals-check-XXXXXX)
+# with --configpath if .luarc.json exists:
+~/.local/share/aid/nvim/mason/bin/lua-language-server \
+  --check <lua_dir> \
+  --checklevel=Warning \
+  --check_format=json \
+  --logpath "$LUALS_LOGDIR" \
+  --configpath "$(pwd)/.luarc.json"
+
+# without --configpath if .luarc.json is absent:
 ~/.local/share/aid/nvim/mason/bin/lua-language-server \
   --check <lua_dir> \
   --checklevel=Warning \
   --check_format=json \
   --logpath "$LUALS_LOGDIR"
-# If a .luarc.json exists in the project root, add:
-#   --configpath <path/to/.luarc.json>
 ```
 
 Then read `$LUALS_LOGDIR/check.json`. It is a JSON array. Each entry has the shape:

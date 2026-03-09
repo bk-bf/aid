@@ -6,37 +6,7 @@
 - [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
 - [ ] **T-022**: **Cross-distro install support** — expand `install.sh` beyond Arch/CachyOS so aid works out-of-the-box on mainstream Linux distros (Ubuntu/Debian, Fedora/RHEL, Alpine, Arch) and macOS. Currently the only managed dependency is `python-pynvim` via `pacman`; every other prerequisite is assumed present, which is false on stock Ubuntu/Fedora images.
 
-  **Full dependency audit:**
-
-  | Dependency | Role | Arch | Ubuntu/Debian | Fedora/RHEL | macOS |
-  |------------|------|------|--------------|-------------|-------|
-  | `tmux ≥ 3.2` | core | `pacman -S tmux` | `apt install tmux` (≥3.2 on 22.04+) | `dnf install tmux` | `brew install tmux` |
-  | `nvim ≥ 0.9` | editor | `pacman -S neovim` | **blocker**: 24.04 ships 0.9.5 ✅; 22.04 ships 0.6 ❌ — needs PPA (`ppa:neovim-ppa/unstable`) or AppImage | `dnf install neovim` (0.9+ on F38+) | `brew install neovim` |
-  | `python3-pynvim` | treemux cwd tracking (Python scripts call pynvim) | `pacman -S python-pynvim` ✅ done | `apt install python3-neovim` or `pip3 install pynvim` | `pip3 install pynvim` | `pip3 install pynvim` |
-  | `lsof` | `watch_and_update.sh` reads cwd via `lsof -a -d cwd -p <pid>` | pre-installed | `apt install lsof` (often missing on minimal images) | pre-installed | pre-installed |
-  | `node` + `npm` | opencode runtime; `markdown-preview.nvim` build step | `pacman -S nodejs npm` | `apt install nodejs npm` (or nvm) | `dnf install nodejs npm` | `brew install node` |
-  | `git` | repo clone, TPM, lazy.nvim bootstrap | pre-installed | pre-installed | pre-installed | pre-installed (Xcode CLT) |
-  | `curl` | `boot.sh` bootstrapper | pre-installed | pre-installed | pre-installed | pre-installed |
-
-  **Known hard cases:**
-  - **Ubuntu 22.04 LTS**: nvim 0.6 in the default repo is too old. The fix is either (a) add `ppa:neovim-ppa/unstable` automatically, or (b) download the official AppImage from GitHub releases and install to `~/.local/bin/nvim`. Option (b) is safer (no PPA trust/key ceremony) and works identically across all distros.
-  - **Alpine / minimal containers**: `lsof` absent; alternative is `readlink /proc/<pid>/cwd` (Linux-only, already commented out in `watch_and_update.sh`). Should use `/proc/` on Linux and `lsof` only as macOS fallback.
-  - **macOS**: `readlink -f` doesn't exist (BSD readlink); `lsof` is present; Homebrew required for tmux/nvim. macOS support is a separate sub-scope.
-  - **`/proc/` vs `lsof` in `watch_and_update.sh`**: the upstream script already has the `/proc/` path commented out. On Linux, `/proc/<pid>/cwd` is faster, needs no extra tool, and works on all distros. A one-line OS detection (`[[ "$OSTYPE" == linux* ]]`) would let us use `/proc/` on Linux and fall back to `lsof` on macOS.
-
-  **Proposed install.sh changes:**
-  1. Add a `_detect_distro()` function returning `arch | debian | fedora | alpine | macos | unknown`.
-  2. Add a `_require <cmd> [install-hint]` helper that checks `command -v` and prints a clear error with distro-specific install instructions if missing — rather than silently failing mid-install.
-  3. Replace the bare `pacman`-only `python-pynvim` block with a distro-dispatch block covering all four Linux families + macOS.
-  4. Add pre-flight checks (before TPM/lazy bootstrap) for `tmux`, `nvim`, `git`, `node`, `lsof` — abort with actionable message if any are missing or below minimum version.
-  5. For nvim < 0.9 on Debian/Ubuntu: offer to install the official AppImage into `~/.local/bin/nvim` automatically.
-  6. In `watch_and_update.sh`: switch cwd detection to `readlink /proc/<pid>/cwd` on Linux (no external tool), `lsof` only on macOS.
-
-  **Scope boundary**: aid does not become a full package manager or attempt to install opencode (it has its own installer). The goal is: on a stock Ubuntu 24.04 / Fedora 40 / Arch image with only `git`, `curl`, and the system package manager available, `bash boot.sh` should produce a working aid session without manual intervention. macOS (Homebrew) is a stretch goal for this task; track separately if needed.
-
 ## Phase 2 — Differentiate (architectural upgrades)
-
-- [ ] **T-025**: **Component-driven palette** — refactor `nvim/lua/palette.lua` from color-name keys (`purple`, `blue`, `lavender`) to role/component keys (`cursor_bg`, `mode_bg`, `statusline_base`, `statusline_mid`, etc.) so a reader of `palette.lua` immediately knows *what* each value affects without cross-referencing `init.lua`. The current color-name variables are consumed in multiple unrelated roles (e.g. `blue` drives both the nvim statusline devinfo segment and the tmux status bar base); splitting them into per-component keys removes that implicit coupling and makes palette customisation safe without needing to trace all call sites.
 
 - [ ] **T-005**: **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
   - `mason.nvim` — binary package manager (~700 packages: LSP servers, DAP adapters, linters, formatters); `:Mason` UI; `ensure_installed` for declarative setup; one-liner `require("mason").setup()`
@@ -62,6 +32,7 @@
 - [ ] **T-018**: Allow `~/.config/opencode/` passthrough — currently `OPENCODE_CONFIG_DIR` is always set to `$AID_DIR/opencode`, which means users cannot carry their existing opencode config (custom models, API keys stored in opencode's config, etc.) into an aid session. A flag or env var to opt out of the override would remove this friction for users who already have an opencode setup they're happy with. Deferred until the scope of config merging is clearer.
 - [ ] **T-019**: User nvim/tmux override layer — a structured insertion point (e.g. `~/.config/aid/nvim/lua/user.lua` required last in `init.lua`) that lets users extend aid's config without forking the repo. Currently deferred because the scope of safely composing arbitrary user configs with aid's own plugin load order, keybinds, and autocmds is undefined. See ADR-012.
 - [ ] **T-024 / BUG-015**: Intermittent `E5560: writefile must not be called in a fast event context` after lazygit commit; needs stack trace on next occurrence to identify call site (see [bugs/watching/BUG-015.md](bugs/watching/BUG-015.md))
+- [ ] **T-025**: **Component-driven palette** — refactor `nvim/lua/palette.lua` from color-name keys (`purple`, `blue`, `lavender`) to role/component keys (`cursor_bg`, `mode_bg`, `statusline_base`, `statusline_mid`, etc.) so a reader of `palette.lua` immediately knows *what* each value affects without cross-referencing `init.lua`. The current color-name variables are consumed in multiple unrelated roles (e.g. `blue` drives both the nvim statusline devinfo segment and the tmux status bar base); splitting them into per-component keys removes that implicit coupling and makes palette customisation safe without needing to trace all call sites.
 
 ## Done
 

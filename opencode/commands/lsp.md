@@ -1,6 +1,38 @@
 ---
-description: Wire Mason-installed LSP servers into opencode.json so OpenCode uses the same binaries as Neovim
+description: Wire Mason LSP binaries into opencode.json (no args), or check and fix LSP diagnostics for a file or all files
 ---
+
+## Usage
+
+```
+/lsp                      — setup: wire Mason LSP binaries into opencode.json (first run)
+/lsp                      — diagnose: check all source files (once opencode.json is configured)
+/lsp nvim/init.lua        — diagnose: check a specific file
+/lsp src/main.go          — diagnose: check a specific file
+```
+
+`$ARGUMENTS` is everything typed after `/lsp`. Examples:
+
+| You type | `$ARGUMENTS` | Behaviour |
+|---|---|---|
+| `/lsp` | _(empty)_ | Setup mode if opencode.json is bare; diagnose all files if already configured |
+| `/lsp nvim/init.lua` | `nvim/init.lua` | Diagnose that specific file |
+| `/lsp src/main.go` | `src/main.go` | Diagnose that specific file |
+
+---
+
+## Mode detection
+
+Check `$ARGUMENTS`:
+
+- **`$ARGUMENTS` is non-empty** → **Diagnose mode** for the specific file given. Skip to [Diagnose mode](#diagnose-mode).
+- **`$ARGUMENTS` is empty** → read `opencode.json` and check whether an `"lsp"` key exists with at least one entry:
+  - **No `lsp` key / bare schema** → **Setup mode**. Continue to [Setup mode](#setup-mode).
+  - **`lsp` key present and populated** → **Diagnose mode** for all source files. Skip to [Diagnose mode](#diagnose-mode).
+
+---
+
+# Setup mode
 
 Sync the `lsp` section of `opencode.json` with the LSP servers currently installed in Mason.
 
@@ -128,4 +160,123 @@ Configured <N> LSP server(s) in opencode.json:
 OpenCode will now use your Mason-installed binaries instead of auto-downloading its own copies.
 To add initialization options or disable a server, edit opencode.json directly.
 Docs: https://opencode.ai/docs/lsp/
+```
+
+---
+
+# Diagnose mode
+
+Check LSP diagnostics for a specific file (if `$ARGUMENTS` is set) or all source files in the project (if `$ARGUMENTS` is empty and `opencode.json` already has LSP config). Show all diagnostics, then offer to fix them.
+
+---
+
+## Step D1 — Determine target files
+
+If `$ARGUMENTS` is non-empty, the target is the single file path given in `$ARGUMENTS`. Verify it exists:
+
+```bash
+ls "$ARGUMENTS"
+```
+
+If the file does not exist, print:
+
+```
+File not found: <$ARGUMENTS>
+Usage: /lsp <file>  — check diagnostics for a specific file
+       /lsp         — check diagnostics for all source files (requires opencode.json to be configured)
+```
+
+Then stop.
+
+If `$ARGUMENTS` is empty, discover all source files in the project:
+
+```bash
+find . -type f \( -name "*.lua" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
+  -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \
+  -o -name "*.sh" -o -name "*.bash" -o -name "*.cs" -o -name "*.java" \
+  -o -name "*.zig" -o -name "*.nix" \) \
+  | grep -v node_modules | grep -v .git | grep -v lazy | grep -v mason \
+  | sort
+```
+
+---
+
+## Step D2 — Read files and collect diagnostics
+
+Read each target file. OpenCode's LSP client will attach to each file and collect diagnostics automatically.
+
+For each diagnostic reported, record:
+- File path (relative to cwd)
+- Line number
+- Severity (`ERROR`, `WARN`, `INFO`, `HINT`)
+- Message
+
+---
+
+## Step D3 — Print diagnostic summary
+
+If no diagnostics were found across all target files, print:
+
+```
+No LSP diagnostics found.
+```
+
+Then stop.
+
+Otherwise print a summary grouped by file, sorted by severity (ERROR first, then WARN, INFO, HINT):
+
+```
+LSP diagnostics:
+
+<relative/path/to/file.lua>
+  line 12  ERROR  undefined global 'foo'
+  line 34  WARN   unused variable 'bar'
+
+<relative/path/to/other.lua>
+  line 5   ERROR  expected ')', got 'end'
+
+Total: <N> error(s), <N> warning(s), <N> info, <N> hint(s) across <N> file(s).
+```
+
+Then ask:
+
+```
+Fix all diagnostics? [Y/n]
+```
+
+If the user answers `n` or `N`, print:
+
+```
+No changes made.
+```
+
+Then stop.
+
+---
+
+## Step D4 — Fix diagnostics
+
+For each file that has diagnostics (ERROR and WARN only — do not auto-fix INFO or HINT unless the user explicitly asks), apply fixes:
+
+- Read the file carefully
+- Fix each reported diagnostic at the correct line
+- Do not change any code that was not flagged
+- Prefer minimal, targeted fixes — do not refactor surrounding code
+- After editing, re-read the file to confirm the fix did not introduce new issues
+
+---
+
+## Step D5 — Print fix summary
+
+```
+Fixed:
+  <relative/path/to/file.lua>  — <N> issue(s) resolved
+  ...
+
+Skipped (INFO/HINT — fix manually if needed):
+  <relative/path/to/file.lua>
+    line 8  HINT  <message>
+  ...
+
+Done. Re-run /lsp <file> to verify no new diagnostics were introduced.
 ```

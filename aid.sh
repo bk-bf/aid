@@ -156,20 +156,37 @@ fi
 export AID_IGNORE
 dbg "aidignore=$_aidignore_file AID_IGNORE=${AID_IGNORE:-<empty>}"
 
-# Start the aid-isolated tmux server with its own config
+# Start the aid-isolated tmux server with its own config.
+# AID_DIR is passed via -e so it is in the server environment before tmux.conf
+# is parsed — tmux.conf uses $AID_DIR (source-file) and #{E:AID_DIR} (run) at
+# load time, both of which require AID_DIR to be present from the start.
 dbg "starting tmux session"
 tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "$session" \
+  -e "AID_DIR=$AID_DIR" \
   -x "$(tput cols)" -y "$(tput lines)"
 
-# Export AID_DIR, AID_IGNORE, XDG_CONFIG_HOME, and OPENCODE_CONFIG_DIR into the server environment
-# so all panes inherit them. XDG_CONFIG_HOME=$AID_DIR means nvim resolves its config directly
-# to $AID_DIR/nvim at launch — no symlink in ~/.config/ required.
-# OPENCODE_CONFIG_DIR isolates opencode to aid's own
-# config dir (commands/, package.json) instead of ~/.config/opencode/.
-tmux -L aid set-environment -g AID_DIR "$AID_DIR"
-tmux -L aid set-environment -g AID_IGNORE "$AID_IGNORE"
-tmux -L aid set-environment -g XDG_CONFIG_HOME "$AID_DIR"
-tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
+# Export AID_DIR, AID_IGNORE, and OPENCODE_CONFIG_DIR into the server environment
+#
+# XDG isolation — only the vars that every pane legitimately needs:
+#   XDG_DATA_HOME, XDG_STATE_HOME, XDG_CACHE_HOME direct runtime artefacts to
+#   ~/.local/{share,state}/aid and ~/.cache/aid — away from the source tree and
+#   away from the user's ~/.local/share/nvim etc.
+#
+# XDG_CONFIG_HOME is intentionally NOT set globally. It is only needed by the
+# nvim process and is injected inline in the respawn-pane command below. Setting
+# it globally would cause every pane shell — and any app opened from them — to
+# treat $AID_DIR as their config home, writing Firefox profiles, lazygit configs,
+# etc. directly into the source tree.
+#
+# OPENCODE_CONFIG_DIR isolates opencode to aid's own config dir (commands/,
+# package.json) instead of ~/.config/opencode/.
+tmux -L aid set-environment -g AID_DIR                  "$AID_DIR"
+tmux -L aid set-environment -g AID_IGNORE               "$AID_IGNORE"
+tmux -L aid set-environment -g XDG_DATA_HOME            "$HOME/.local/share/aid"
+tmux -L aid set-environment -g XDG_STATE_HOME           "$HOME/.local/state/aid"
+tmux -L aid set-environment -g XDG_CACHE_HOME           "$HOME/.cache/aid"
+tmux -L aid set-environment -g OPENCODE_CONFIG_DIR      "$AID_DIR/opencode"
+tmux -L aid set-environment -g TMUX_PLUGIN_MANAGER_PATH "$AID_DIR/tmux/plugins/"
 # NVIM_APPNAME in the server environment means every pane shell inherits it —
 # no dependency on the send-keys command being delivered intact.
 tmux -L aid set-environment -g NVIM_APPNAME "nvim"

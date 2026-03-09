@@ -1,0 +1,5 @@
+# Ignore all plugin subdirectories installed by TPM/install.sh.
+# Only .gitkeep (this file's sibling) and this .gitignore are tracked.
+*
+!.gitkeep
+!.gitignore

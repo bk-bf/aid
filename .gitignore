@@ -1,2 +1,23 @@
+# ── nvim-treemux ─────────────────────────────────────────────────────────────
 nvim-treemux/lazy-lock.json
+
+# ── opencode ──────────────────────────────────────────────────────────────────
 opencode/node_modules/
+opencode/.gitignore
+opencode/bin/
+
+# ── tmux ──────────────────────────────────────────────────────────────────────
+# palette.conf is generated at session start by gen-tmux-palette.sh
+tmux/palette.conf
+# plugins/ holds TPM and plugin clones installed by install.sh — not source.
+# The directory itself (with .gitkeep + .gitignore) is tracked; its contents are not.
+tmux/plugins/*
+!tmux/plugins/.gitkeep
+!tmux/plugins/.gitignore
+
+# ── nvim runtime artefacts ────────────────────────────────────────────────────
+# These land under $AID_DIR/nvim/ only on stale/misconfigured installs.
+# Correct target is ~/.local/{share,state,cache}/aid/nvim/.  Kept as safety net.
+nvim/site/
+nvim/undo/
+nvim/lazy/

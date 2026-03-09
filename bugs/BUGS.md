@@ -5,7 +5,7 @@
 
 ### BUG-018: bufferline tab bar does not show opened files
 
-**Status**: open — needs reliable repro
+**Status**: closed — needs monitoring for confimation
 **Repro**: open a file from the treemux sidebar or cold-start with a file argument; the tab bar sometimes shows no tab for the opened buffer even though the buffer is loaded.
 **Notes**: buffer is confirmed loaded (`:buffers` shows it); tab bar simply does not render a tab for it. Intermittent. Root cause: treemux sidebar sends `:tabnew <file>` via msgpack-RPC (`nvim_command`); `BufAdd`/`TabNew` fire but `redrawtabline` is never called after the RPC dispatch, so bufferline's rendered tabline is stale. Fix: add `BufAdd`/`TabNew` autocmd calling `redrawtabline`. See [open/BUG-018.md](open/BUG-018.md).
 

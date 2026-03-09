@@ -522,6 +522,11 @@ require("lazy").setup({
 
 vim.o.cursorline = true
 
+-- BUG-014: suppress <Tab> in the sidebar nvim so BufferLineCycleNext (loaded
+-- via the full plugin set) cannot open file buffers inside the sidebar pane.
+-- The sidebar is navigation-only; cycling its buffers is never a desired action.
+vim.keymap.set("n", "<Tab>", "<Nop>", { noremap = true, silent = true })
+
 -- Auto-focus tree root to current directory (hide parents)
 vim.api.nvim_create_autocmd("DirChanged", {
   callback = function()

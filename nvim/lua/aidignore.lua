@@ -83,6 +83,26 @@ local function _read_file(path)
   return raw
 end
 
+-- Update Telescope's live file_ignore_patterns without re-calling telescope.setup().
+--
+-- IMPLEMENTATION NOTE:
+--   require("telescope.config").values is a module-level singleton table that every
+--   Telescope picker reads at invocation time. Assigning to it is the same mechanism
+--   Telescope uses internally (config.set_defaults() writes into this exact table).
+--   The assignment takes effect on the very next Telescope call — no restart required.
+--
+--   Stability: config.values has been the authoritative config store since
+--   telescope.nvim's initial architecture. Safe to treat as stable private API.
+local function _apply_to_telescope()
+  local ok, cfg = pcall(require, "telescope.config")
+  if not ok then return end
+  local base = { "^%.git[/\\]" }
+  for _, tp in ipairs(M.patterns().telescope) do
+    table.insert(base, tp)
+  end
+  cfg.values.file_ignore_patterns = base
+end
+
 -- Update live nvim-tree filter state and redraw without calling setup() again.
 --
 -- PRIVATE API DEPENDENCY:
@@ -121,6 +141,9 @@ local function _apply_to_nvimtree()
     end
   end
   pcall(api.tree.reload)
+  -- Also update Telescope so live_grep / find_files pick up the new patterns
+  -- immediately without an nvim restart (BUG-011).
+  _apply_to_telescope()
 end
 
 -- Returns { raw = {...}, telescope = {...} }

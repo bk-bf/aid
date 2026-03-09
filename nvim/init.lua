@@ -474,15 +474,12 @@ require("lazy").setup({
       },
     },
     config = function(_, opts)
-      -- Merge .aidignore patterns into defaults.file_ignore_patterns
-      local aidignore = require("aidignore")
-      local base = { "^%.git[/\\]" }
-      for _, p in ipairs(aidignore.patterns().telescope) do
-        table.insert(base, p)
-      end
-      opts.defaults = opts.defaults or {}
-      opts.defaults.file_ignore_patterns = base
       require("telescope").setup(opts)
+      -- Apply .aidignore patterns to Telescope immediately after setup (BUG-011).
+      -- aidignore.reset() sets file_ignore_patterns via _apply_to_telescope(), which
+      -- is the same path used by the live fs_event watcher — startup and live-update
+      -- are now identical. No manual pattern merge needed here.
+      require("aidignore").reset()
     end,
   },
 

@@ -225,6 +225,61 @@ Generated selene.toml in project root (<choice> preset).
 
 ---
 
+## Step 4c — Bootstrap .luarc.json (Lua projects only)
+
+Run this step only if **all three** conditions hold:
+- `lua-language-server` was found in Mason bin during Step 1
+- At least one `.lua` file exists anywhere in the project
+- No `.luarc.json` exists anywhere from the project root down to any Lua subdirectory (check with `find . -name ".luarc.json" -not -path "*/.git/*" | head -1`)
+
+If `.luarc.json` already exists, print:
+```
+.luarc.json already present — left unchanged.
+```
+Then skip the rest of this step.
+
+If all conditions hold, print:
+
+```
+lua-language-server is installed and this project contains Lua files.
+No .luarc.json found — without it, lua-ls will report 'vim' as undefined global.
+Generate a .luarc.json in the project root?
+
+  [1] Neovim — LuaJIT runtime, vim global recognised, no third-party checking
+  [n] Skip
+```
+
+Wait for the user's answer.
+
+If the user answers `n` or `N` or `skip`: print `.luarc.json not generated.` and skip.
+
+If the user answers `1` or `neovim`: write the following to `.luarc.json` in the project root:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime": {
+    "version": "LuaJIT"
+  },
+  "workspace": {
+    "library": [],
+    "checkThirdParty": false
+  },
+  "diagnostics": {
+    "globals": ["vim"]
+  }
+}
+```
+
+After writing, print:
+```
+Generated .luarc.json in project root (Neovim preset).
+```
+
+Note: `.luarc.json` is gitignored in aid projects by default. If you want to track it, remove it from `.gitignore`.
+
+---
+
 # Diagnose mode
 
 You are here because either `$ARGUMENTS` is non-empty (specific file), or `$ARGUMENTS` is empty and `opencode.json` already has LSP config (all files).
@@ -296,28 +351,38 @@ Run each applicable tool. Collect all output. Do not stop on non-zero exit — l
 
 `lua-language-server --check` operates on a **directory**, not individual files. For each unique directory that contains `.lua` files in the target list, run:
 
-Before constructing the command, check for `.luarc.json` in the project root:
+Before constructing the command, locate `.luarc.json` by walking from `<lua_dir>` up to the project root (cwd):
 
 ```bash
-ls .luarc.json
+# Walk from lua_dir up to cwd looking for .luarc.json
+dir=<lua_dir>
+luarc=""
+while true; do
+  if [ -f "$dir/.luarc.json" ]; then
+    luarc="$dir/.luarc.json"
+    break
+  fi
+  [ "$dir" = "$(pwd)" ] && break
+  dir=$(dirname "$dir")
+done
 ```
 
-- If found: always include `--configpath $(pwd)/.luarc.json` in the invocation.
+- If found: always include `--configpath "$luarc"` in the invocation.
 - If not found: omit `--configpath` entirely.
 
 Then run:
 
 ```bash
 LUALS_LOGDIR=$(mktemp -d /tmp/luals-check-XXXXXX)
-# with --configpath if .luarc.json exists:
+# with --configpath if .luarc.json was found:
 ~/.local/share/aid/nvim/mason/bin/lua-language-server \
   --check <lua_dir> \
   --checklevel=Warning \
   --check_format=json \
   --logpath "$LUALS_LOGDIR" \
-  --configpath "$(pwd)/.luarc.json"
+  --configpath "$luarc"
 
-# without --configpath if .luarc.json is absent:
+# without --configpath if .luarc.json was not found:
 ~/.local/share/aid/nvim/mason/bin/lua-language-server \
   --check <lua_dir> \
   --checklevel=Warning \

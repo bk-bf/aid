@@ -415,6 +415,14 @@ require("lazy").setup({
         -- bufferline fights showtabline = 2 and can blank the bar on single-buffer
         -- sessions (e.g. right after a cold start or after closing all but one tab).
         always_show_bufferline = true,
+        -- BUG-018: use bwipe instead of the default bdelete so closed buffers leave
+        -- no ghost entry.  bdelete marks the buffer unlisted+unloaded but keeps it
+        -- in nvim's buffer table; _remote_bufnr() then finds it via bufnr() and
+        -- routes `buffer N` into the invisible ghost, hiding it from bufferline.
+        -- bwipe removes the entry entirely, so the dedup check correctly falls
+        -- through to tabnew on the next open.
+        close_command       = "bwipe! %d",
+        right_mouse_command = "bwipe! %d",
       },
       highlights = {
         fill                      = { bg = p.tab_bg },
@@ -453,7 +461,9 @@ require("lazy").setup({
     keys = {
       { "<Tab>",       "<cmd>BufferLineCycleNext<cr>", desc = "Next tab" },
       { "<S-Tab>",     "<cmd>BufferLineCyclePrev<cr>", desc = "Prev tab" },
-      { "<leader>q",   "<cmd>bdelete<cr>",             desc = "Close tab" },
+      -- BUG-018: bwipe instead of bdelete — removes the buffer entry entirely so
+      -- _remote_bufnr() cannot find a ghost unlisted buffer on the next open.
+      { "<leader>q",   "<cmd>bwipe<cr>",               desc = "Close tab" },
       { "<leader>tb",  function()
           vim.o.showtabline = vim.o.showtabline == 2 and 1 or 2
           vim.cmd("redrawtabline")

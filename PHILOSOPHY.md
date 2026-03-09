@@ -1,5 +1,8 @@
 # Philosophy
 
+**Branch**: dev-docs  
+**Updated**: 2026-03-07
+
 ## Origin
 
 aid started as a personal Neovim config. It grew because a specific problem needed solving: the gap between the raw power of nvim/tmux/opencode and the friction required to actually use them productively from day one.

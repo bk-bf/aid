@@ -94,7 +94,7 @@ vim.keymap.set("n", "<leader>?", _cs_open, { desc = "Open cheatsheet" })
 -- BOOTSTRAP LAZY.NVIM
 -- ============================================================
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
   vim.fn.system({ "git", "clone", "https://github.com/folke/lazy.nvim.git", lazypath })
 end
 vim.opt.rtp:prepend(lazypath)
@@ -168,9 +168,9 @@ local function _bm_write(t)
 end
 -- Returns the most meaningful path: real file buffer → its path; otherwise → cwd
 local function _bm_current()
-  local p = vim.fn.expand("%:p")
-  if p ~= "" and vim.fn.filereadable(p) == 1 then
-    return p
+  local path = vim.fn.expand("%:p")
+  if path ~= "" and vim.fn.filereadable(path) == 1 then
+    return path
   end
   return vim.fn.getcwd()
 end
@@ -188,10 +188,10 @@ local function _bm_open_picker()
       prompt_title = "Bookmarks",
       finder = require("telescope.finders").new_table({
         results = t,
-        entry_maker = function(p)
-          local is_dir = vim.fn.isdirectory(p) == 1
+        entry_maker = function(path)
+          local is_dir = vim.fn.isdirectory(path) == 1
           local icon = is_dir and " " or " "
-          return { value = p, display = icon .. vim.fn.fnamemodify(p, ":~"), ordinal = p, path = p }
+          return { value = path, display = icon .. vim.fn.fnamemodify(path, ":~"), ordinal = path, path = path }
         end,
       }),
       previewer = conf.file_previewer({}),
@@ -217,26 +217,26 @@ local function _bm_open_picker()
     :find()
 end
 vim.keymap.set("n", "<leader>ba", function()
-  local p = _bm_current()
+  local path = _bm_current()
   local t = _bm_read()
   for _, v in ipairs(t) do
-    if v == p then
+    if v == path then
       vim.notify("Already bookmarked")
       return
     end
   end
-  table.insert(t, p)
+  table.insert(t, path)
   _bm_write(t)
-  local label = vim.fn.isdirectory(p) == 1 and "Dir" or "File"
-  vim.notify(label .. " bookmarked: " .. vim.fn.fnamemodify(p, ":~"))
+  local label = vim.fn.isdirectory(path) == 1 and "Dir" or "File"
+  vim.notify(label .. " bookmarked: " .. vim.fn.fnamemodify(path, ":~"))
 end, { desc = "Bookmark: add file or dir" })
 vim.keymap.set("n", "<leader>bd", function()
-  local p = _bm_current()
+  local path = _bm_current()
   local t = _bm_read()
   local new = {}
   local removed = false
   for _, v in ipairs(t) do
-    if v ~= p then
+    if v ~= path then
       table.insert(new, v)
     else
       removed = true
@@ -400,26 +400,26 @@ require("lazy").setup({
           vim.keymap.set("n", key, fn, { buffer = bufnr, desc = desc, noremap = true, silent = true })
         end
         map("<leader>ba", "Bookmark: add cwd", function()
-          local p = _bm_current()
+          local path = _bm_current()
           local t = _bm_read()
           for _, v in ipairs(t) do
-            if v == p then
+            if v == path then
               vim.notify("Already bookmarked")
               return
             end
           end
-          table.insert(t, p)
+          table.insert(t, path)
           _bm_write(t)
-          local label = vim.fn.isdirectory(p) == 1 and "Dir" or "File"
-          vim.notify(label .. " bookmarked: " .. vim.fn.fnamemodify(p, ":~"))
+          local label = vim.fn.isdirectory(path) == 1 and "Dir" or "File"
+          vim.notify(label .. " bookmarked: " .. vim.fn.fnamemodify(path, ":~"))
         end)
         map("<leader>bd", "Bookmark: remove cwd", function()
-          local p = _bm_current()
+          local path = _bm_current()
           local t = _bm_read()
           local new = {}
           local removed = false
           for _, v in ipairs(t) do
-            if v ~= p then
+            if v ~= path then
               table.insert(new, v)
             else
               removed = true

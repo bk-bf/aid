@@ -2,6 +2,12 @@
 
 ## Open
 
+### BUG-018: bufferline tab bar does not show opened files
+
+**Status**: open — needs reliable repro
+**Repro**: open a file from the treemux sidebar or cold-start with a file argument; the tab bar sometimes shows no tab for the opened buffer even though the buffer is loaded.
+**Notes**: buffer is confirmed loaded (`:buffers` shows it); tab bar simply does not render a tab for it. Intermittent. Root cause: treemux sidebar sends `:tabnew <file>` via msgpack-RPC (`nvim_command`); `BufAdd`/`TabNew` fire but `redrawtabline` is never called after the RPC dispatch, so bufferline's rendered tabline is stale. Fix: add `BufAdd`/`TabNew` autocmd calling `redrawtabline`. See [open/BUG-018.md](open/BUG-018.md).
+
 ### BUG-012: bufferline truncation count `[+N]` cannot be hidden via config
 
 **Status**: open — upstream — do not fix in aid
@@ -25,10 +31,6 @@
 **Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [watching/BUG-015.md](watching/BUG-015.md).
 
 ## Closed
-
-### BUG-018: bufferline tab bar does not show opened files
-
-**Status**: closed — fixed 2026-03-09 — see [archive/BUG-018.md](archive/BUG-018.md)
 
 ### BUG-020: markdown-preview opens Firefox instead of default browser; writes mozilla/ into repo
 

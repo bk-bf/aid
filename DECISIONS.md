@@ -178,6 +178,19 @@ The navigation binds (`C-h/j/k/l`) are functionally integrated with aid's nvim c
 
 ---
 
+### ADR-014: `tmux/plugins/` lives inside `AID_DIR`, not `XDG_DATA_HOME`
+
+**Date**: 2026-03
+**Status**: Made — current behaviour; low-priority candidate for revisiting
+
+**Decision**: TPM and all tmux plugins are cloned into `$AID_DIR/tmux/plugins/` (inside the repo) rather than `$XDG_DATA_HOME/tmux/plugins/` (`~/.local/share/aid/tmux/plugins/`).
+
+**Reason**: The whole `aid/` directory is designed to be self-contained — one `git clone` gives a fully working tree. Keeping plugins inside the repo means a single directory holds everything: config, scripts, and runtime plugins. Moving plugins to `XDG_DATA_HOME` would require updating `tmux.conf`'s `@plugin` paths, `TMUX_PLUGIN_MANAGER_PATH`, and `install.sh`'s clone targets — non-trivial churn for a cosmetic gain.
+
+**Under consideration**: Moving plugins to `~/.local/share/aid/tmux/plugins/` would give a cleaner source/data separation (the repo would contain only source files; runtime-installed data would live outside it). Worth doing if the repo is ever made read-only or installed system-wide.
+
+---
+
 ## Superseded
 
 ADRs in this section were previously made but overridden by a later decision. Kept for historical record.

@@ -3,7 +3,7 @@
 ## Phase 1 — Harden (fix before any promotion)
 
 - [ ] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
-- [ ] **T-023 / BUG-014**: `<Tab>` in treemux sidebar opens file inside sidebar pane instead of editor pane; fix: unmap `<Tab>` in `treemux_init.lua` after plugin setup (see [bugs/BUG-014.md](bugs/BUG-014.md))
+- [x] **T-023 / BUG-014**: `<Tab>` in treemux sidebar opens file inside sidebar pane — fixed: `<Tab>` remapped to `<Nop>` in `treemux_init.lua` after plugin setup
 - [ ] **T-022**: **Cross-distro install support** — expand `install.sh` beyond Arch/CachyOS so aid works out-of-the-box on mainstream Linux distros (Ubuntu/Debian, Fedora/RHEL, Alpine, Arch) and macOS. Currently the only managed dependency is `python-pynvim` via `pacman`; every other prerequisite is assumed present, which is false on stock Ubuntu/Fedora images.
 - [ ] **T-024 / BUG-015**: Intermittent `E5560: writefile must not be called in a fast event context` after lazygit commit; needs stack trace on next occurrence to identify call site (see [bugs/BUG-015.md](bugs/BUG-015.md))
 
@@ -36,6 +36,8 @@
   **Scope boundary**: aid does not become a full package manager or attempt to install opencode (it has its own installer). The goal is: on a stock Ubuntu 24.04 / Fedora 40 / Arch image with only `git`, `curl`, and the system package manager available, `bash boot.sh` should produce a working aid session without manual intervention. macOS (Homebrew) is a stretch goal for this task; track separately if needed.
 
 ## Phase 2 — Differentiate (architectural upgrades)
+
+- [ ] **T-025**: **Component-driven palette** — refactor `nvim/lua/palette.lua` from color-name keys (`purple`, `blue`, `lavender`) to role/component keys (`cursor_bg`, `mode_bg`, `statusline_base`, `statusline_mid`, etc.) so a reader of `palette.lua` immediately knows *what* each value affects without cross-referencing `init.lua`. The current color-name variables are consumed in multiple unrelated roles (e.g. `blue` drives both the nvim statusline devinfo segment and the tmux status bar base); splitting them into per-component keys removes that implicit coupling and makes palette customisation safe without needing to trace all call sites.
 
 - [ ] **T-005**: **Language tooling layer** — centralised install and management of LSP servers, linters, formatters, and debuggers via mason.nvim. No per-language binaries shipped with aid; users install what they need via `:Mason` or a declarative `ensure_installed` list. Stack:
   - `mason.nvim` — binary package manager (~700 packages: LSP servers, DAP adapters, linters, formatters); `:Mason` UI; `ensure_installed` for declarative setup; one-liner `require("mason").setup()`

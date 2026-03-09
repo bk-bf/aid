@@ -12,6 +12,13 @@ local _watchers = {}
 
 -- Refresh the treemux sidebar nvim-tree via direct msgpack-RPC.
 -- treemux_init.lua registers its socket in @-treemux-nvim-socket-<editor_pane_id>.
+--
+-- We send only api.tree.reload() — NOT aidignore.reset().
+-- reset() calls _apply_to_nvimtree() which calls pcall(s.sync), and sync()
+-- runs checktime in the sidebar nvim context. checktime sees that .aidignore
+-- changed on disk and opens it as a buffer, destroying the nvim-tree window.
+-- The sidebar inherits filters from AID_IGNORE at startup; live filter changes
+-- are handled by aidignore.watch() running inside the sidebar nvim directly.
 local function _refresh_treemux_sidebar()
   local tmux_pane = vim.env.TMUX_PANE
   if not tmux_pane or tmux_pane == "" then return end
@@ -26,7 +33,7 @@ local function _refresh_treemux_sidebar()
   -- pcall guards against a dead socket (treemux restarting, etc.).
   pcall(function()
     local chan = vim.fn.sockconnect("pipe", socket, { rpc = true })
-    vim.rpcnotify(chan, "nvim_exec_lua", "require('aidignore').reset()", {})
+    vim.rpcnotify(chan, "nvim_exec_lua", "pcall(require('nvim-tree.api').tree.reload)", {})
     -- brief yield so the notification is flushed before we close the channel
     vim.defer_fn(function() pcall(vim.fn.chanclose, chan) end, 500)
   end)

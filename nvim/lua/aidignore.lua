@@ -100,7 +100,12 @@ end
 --   1. tmux kill-pane <sidebar_pane_id>
 --   2. run ensure_treemux.sh to reopen the sidebar fresh (picks up new filters
 --      from disk via aidignore.lua at startup). ~0.5s blank pane visual glitch.
---   See _refresh_treemux_sidebar() in sync.lua for the pane lookup logic needed.
+--
+-- NOTE: _apply_to_nvimtree() deliberately does NOT call sync.sync().
+--   sync() runs checktime which can cause nvim to open .aidignore as a buffer
+--   when this function executes inside the sidebar nvim (destroying the tree
+--   window). The sidebar's tree is refreshed by _refresh_treemux_sidebar() in
+--   sync.lua, which sends only api.tree.reload() via RPC — no checktime.
 local function _apply_to_nvimtree()
   local ok_core, core = pcall(require, "nvim-tree.core")
   if not ok_core then return end
@@ -116,10 +121,6 @@ local function _apply_to_nvimtree()
     end
   end
   pcall(api.tree.reload)
-
-  -- Also refresh the treemux sidebar (separate nvim process) via sync.
-  local ok_sync, s = pcall(require, "sync")
-  if ok_sync then pcall(s.sync) end
 end
 
 -- Returns { raw = {...}, telescope = {...} }

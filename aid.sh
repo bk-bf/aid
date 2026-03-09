@@ -150,6 +150,7 @@ _bootstrap_file() {
 }
 _bootstrap_file ".aidignore"
 _bootstrap_file ".nvim.lua"
+_bootstrap_file "opencode.json"
 
 # Parse .aidignore (walks up from launch_dir) and build AID_IGNORE=comma,separated,list.
 _aidignore_file=""

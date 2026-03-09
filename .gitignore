@@ -1,3 +1,9 @@
+# ── personal dev tooling (not for distribution) ──────────────────────────────
+# .nvim.lua  — per-developer exrc (formatter/linter wiring, local overrides)
+# selene.toml — selene linter config (only meaningful if selene is installed)
+.nvim.lua
+selene.toml
+
 # ── nvim-treemux ─────────────────────────────────────────────────────────────
 nvim-treemux/lazy-lock.json
 

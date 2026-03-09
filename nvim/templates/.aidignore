@@ -1,0 +1,51 @@
+# .aidignore — hide files from the aid file tree and search
+# Placed here by aid on first run. Edit freely; changes take effect immediately.
+#
+# What it does: patterns listed here are hidden from the nvim-tree file sidebar
+# and from Telescope file/text search. Useful for build artefacts, caches, and
+# generated files you never want to navigate to.
+#
+# Format:
+#   - One pattern per line. Lines starting with # are comments.
+#   - Patterns are matched against the full path (e.g. "node_modules" hides
+#     any directory named node_modules anywhere in the tree).
+#   - Plain names only — glob wildcards (*.ext) are not supported.
+
+# ── Node / JS ─────────────────────────────────────────────────────────────────
+node_modules
+.npm
+.yarn
+dist
+.next
+.nuxt
+out
+build
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__
+.venv
+venv
+env
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.tox
+
+# ── Rust ──────────────────────────────────────────────────────────────────────
+target
+
+# ── Go ────────────────────────────────────────────────────────────────────────
+vendor
+
+# ── Version control ───────────────────────────────────────────────────────────
+.git
+.svn
+.hg
+
+# ── OS noise ──────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Logs and temp ─────────────────────────────────────────────────────────────
+.cache
+tmp
+temp

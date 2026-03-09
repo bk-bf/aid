@@ -131,9 +131,27 @@ while tmux -L aid has-session -t "$session" 2>/dev/null; do
 done
 dbg "session=$session"
 
+# Bootstrap project files from templates on first run.
+# Each file is only written if it does not already exist anywhere in the
+# directory walk — existing files are never overwritten.
+_tmpl_dir="$AID_DIR/nvim/templates"
+_bootstrap_file() {
+  local name="$1" found=0 dir="$launch_dir"
+  for _i in $(seq 1 20); do
+    [[ -f "$dir/$name" ]] && { found=1; break; }
+    local parent; parent="$(dirname "$dir")"
+    [[ "$parent" == "$dir" ]] && break
+    dir="$parent"
+  done
+  if (( found == 0 )); then
+    cp "$_tmpl_dir/$name" "$launch_dir/$name"
+    dbg "bootstrapped $name from template"
+  fi
+}
+_bootstrap_file ".aidignore"
+_bootstrap_file ".nvim.lua"
+
 # Parse .aidignore (walks up from launch_dir) and build AID_IGNORE=comma,separated,list.
-# If no .aidignore is found anywhere, create an empty one in launch_dir so the
-# file watcher in nvim has a file to watch from the start.
 _aidignore_file=""
 _dir="$launch_dir"
 for _i in $(seq 1 20); do
@@ -146,7 +164,7 @@ for _i in $(seq 1 20); do
   _dir="$_parent"
 done
 if [[ -z "$_aidignore_file" ]]; then
-  touch "$launch_dir/.aidignore"
+  # Template copy above guarantees the file exists; this is a safety fallback.
   _aidignore_file="$launch_dir/.aidignore"
 fi
 if [[ -n "$_aidignore_file" ]]; then

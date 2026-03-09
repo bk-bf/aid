@@ -5,6 +5,12 @@
 set -euo pipefail
 
 AID_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+XDG_DATA_HOME="$HOME/.local/share/aid"
+XDG_STATE_HOME="$HOME/.local/state/aid"
+XDG_CACHE_HOME="$HOME/.cache/aid"
+OPENCODE_CONFIG_DIR="$AID_DIR/opencode"
+OPENCODE_TUI_CONFIG="$AID_DIR/opencode/tui.json"
+TMUX_PLUGIN_MANAGER_PATH="$AID_DIR/tmux/plugins/"
 
 # ── Debug mode ───────────────────────────────────────────────────────────────
 # Consume -d/--debug before the main case so it composes with other flags.
@@ -165,12 +171,12 @@ tmux -L aid source-file "$AID_DIR/tmux/palette.conf"
 # It is injected inline only on the nvim respawn-pane command below.
 tmux -L aid set-environment -g AID_DIR                  "$AID_DIR"
 tmux -L aid set-environment -g AID_IGNORE               "$AID_IGNORE"
-tmux -L aid set-environment -g XDG_DATA_HOME            "$HOME/.local/share/aid"
-tmux -L aid set-environment -g XDG_STATE_HOME           "$HOME/.local/state/aid"
-tmux -L aid set-environment -g XDG_CACHE_HOME           "$HOME/.cache/aid"
-tmux -L aid set-environment -g OPENCODE_CONFIG_DIR      "$AID_DIR/opencode"
-tmux -L aid set-environment -g OPENCODE_TUI_CONFIG      "$AID_DIR/opencode/tui.json"
-tmux -L aid set-environment -g TMUX_PLUGIN_MANAGER_PATH "$AID_DIR/tmux/plugins/"
+tmux -L aid set-environment -g XDG_DATA_HOME            "$XDG_DATA_HOME"
+tmux -L aid set-environment -g XDG_STATE_HOME           "$XDG_STATE_HOME"
+tmux -L aid set-environment -g XDG_CACHE_HOME           "$XDG_CACHE_HOME"
+tmux -L aid set-environment -g OPENCODE_CONFIG_DIR      "$OPENCODE_CONFIG_DIR"
+tmux -L aid set-environment -g OPENCODE_TUI_CONFIG      "$OPENCODE_TUI_CONFIG"
+tmux -L aid set-environment -g TMUX_PLUGIN_MANAGER_PATH "$TMUX_PLUGIN_MANAGER_PATH"
 # NVIM_APPNAME in the server environment means every pane shell inherits it.
 tmux -L aid set-environment -g NVIM_APPNAME "nvim"
 # AID_NVIM_SOCKET: session-local so concurrent sessions each target their own nvim.
@@ -199,7 +205,7 @@ dbg "editor_pane_id=$editor_pane_id"
 # (no shell prompt — avoids zsh intercept, send-keys mangling, autocorrect).
 dbg "splitting opencode pane"
 tmux -L aid split-window -h -p 29 -t "$editor_pane_id" \
-  "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode $(printf '%q' "$launch_dir")"
+  "OPENCODE_CONFIG_DIR=$(printf '%q' "$OPENCODE_CONFIG_DIR") OPENCODE_TUI_CONFIG=$(printf '%q' "$OPENCODE_TUI_CONFIG") opencode $(printf '%q' "$launch_dir")"
 opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
   | sort -k2 -n | tail -1 | cut -d' ' -f1)
 dbg "opencode_pane_id=$opencode_pane_id"
@@ -218,7 +224,7 @@ tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/ensure_treemux.sh"
 # To kill the session entirely: close the tmux window or run `aid kill`.
 dbg "respawning editor pane into nvim loop"
 tmux -L aid respawn-pane -k -t "$editor_pane_id" \
-  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") XDG_DATA_HOME=$(printf '%q' "$HOME/.local/share/aid") XDG_STATE_HOME=$(printf '%q' "$HOME/.local/state/aid") XDG_CACHE_HOME=$(printf '%q' "$HOME/.cache/aid") LG_CONFIG_FILE=$(printf '%q' "$HOME/.config/aid/lazygit/config.yml") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
+  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") XDG_DATA_HOME=$(printf '%q' "$XDG_DATA_HOME") XDG_STATE_HOME=$(printf '%q' "$XDG_STATE_HOME") XDG_CACHE_HOME=$(printf '%q' "$XDG_CACHE_HOME") LG_CONFIG_FILE=$(printf '%q' "$HOME/.config/aid/lazygit/config.yml") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
 
 dbg "attaching to session=$session"
 attach_or_switch "$session"

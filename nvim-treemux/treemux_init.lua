@@ -56,7 +56,7 @@ vim.o.termguicolors = true
 
 -- lazy.nvim plugin manager
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not vim.loop.fs_stat(lazypath) then
+if not vim.uv.fs_stat(lazypath) then
   vim.fn.system({
     "git",
     "clone",
@@ -341,7 +341,7 @@ require("lazy").setup({
             if vim.g.treemux_last_opened == "nvim-tree" then
               -- if oil is open, close it and open nvim-tree
               vim.cmd("Oil close")
-              require("nvim-tree.lib").open({ current_window = true })
+              require("nvim-tree.api").tree.open({ current_window = true })
             elseif vim.g.treemux_last_opened == "neo-tree" then
               -- if oil is open, close it
               vim.cmd("Oil close")

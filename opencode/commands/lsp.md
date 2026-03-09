@@ -212,6 +212,19 @@ For each tool:
 - Parse its output to extract: file path, line number, severity, message
 - Normalise severity to: `ERROR`, `WARN`, `INFO`, `HINT`
 
+### lua-language-server — config resolution
+
+`lua-language-server --check` operates on a directory. Before running it on a directory `<dir>`, locate the nearest `.luarc.json` by walking up the directory tree from `<dir>` toward the project root:
+
+```
+<dir>/.luarc.json
+<dir>/../.luarc.json
+<dir>/../../.luarc.json
+... (stop at project root / cwd)
+```
+
+Use the first `.luarc.json` found. If one is found, pass `--configpath <absolute-path-to-.luarc.json>`. If none is found anywhere in the tree, omit `--configpath`.
+
 ---
 
 ## Step D4 — Collect and print unified diagnostic summary

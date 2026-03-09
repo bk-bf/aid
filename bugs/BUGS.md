@@ -33,6 +33,10 @@
 
 ## Closed
 
+### BUG-021: LSP/treesitter semantic tokens bleed fg color over bufferline buffer name
+
+**Status**: closed — fixed 2026-03-09 — see [archive/BUG-021.md](archive/BUG-021.md)
+
 ### BUG-020: markdown-preview opens Firefox instead of default browser; writes mozilla/ into repo
 
 **Status**: closed — fixed 2026-03-09 — see [archive/BUG-020.md](archive/BUG-020.md)

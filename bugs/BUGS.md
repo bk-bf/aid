@@ -32,6 +32,10 @@
 
 ## Closed
 
+### BUG-020: markdown-preview opens Firefox instead of default browser; writes mozilla/ into repo
+
+**Status**: closed — fixed 2026-03 — see [archive/BUG-020.md](archive/BUG-020.md)
+
 ### BUG-019: .aidignore plain names hide files whose names contain the pattern as a substring
 
 **Status**: closed — fixed 2026-03 — see [archive/BUG-019.md](archive/BUG-019.md)

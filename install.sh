@@ -53,7 +53,7 @@ fi
 #
 # The sidebar (NVIM_APPNAME=treemux) still needs a symlink because nvim-treemux/
 # lives in its own shipped location and is not co-located with $AID.
-echo "==> Creating symlinks under $AID_CONFIG ..."
+echo "==> Creating symlinks and config files under $AID_CONFIG ..."
 mkdir -p "$AID_CONFIG"
 
 # ~/.config/aid/treemux/ → aid/nvim-treemux/  (sidebar — NVIM_APPNAME=treemux)
@@ -63,6 +63,15 @@ if [[ -d "$AID_CONFIG/treemux" && ! -L "$AID_CONFIG/treemux" ]]; then
 fi
 ln -sfn "$AID/nvim-treemux" "$AID_CONFIG/treemux"
 echo "  $AID_CONFIG/treemux -> $AID/nvim-treemux"
+
+# lazygit config — copy template if not already present (preserves user edits)
+mkdir -p "$AID_CONFIG/lazygit"
+if [[ ! -f "$AID_CONFIG/lazygit/config.yml" ]]; then
+  cp "$AID/nvim/templates/lazygit.yml" "$AID_CONFIG/lazygit/config.yml"
+  echo "  created: $AID_CONFIG/lazygit/config.yml"
+else
+  echo "  lazygit config already present: $AID_CONFIG/lazygit/config.yml"
+fi
 
 # ── 5. nvim plugin bootstrap (headless lazy sync) ────────────────────────────
 _spin() {

@@ -1,0 +1,37 @@
+# lazygit config for aid
+# Managed by aid — edit this file in the aid repo, then run `aid -i` to apply.
+# Full config reference: https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md
+
+gui:
+  nerdFontsVersion: "3"
+  theme:
+    activeBorderColor:
+      - "#e8a24a"
+      - bold
+    inactiveBorderColor:
+      - "#3b4048"
+    optionsTextColor:
+      - "#61afef"
+    selectedLineBgColor:
+      - "#2c313a"
+    cherryPickedCommitBgColor:
+      - "#3e4451"
+    cherryPickedCommitFgColor:
+      - "#e8a24a"
+    unstagedChangesColor:
+      - "#e06c75"
+    defaultFgColor:
+      - "#abb2bf"
+    searchingActiveBorderColor:
+      - "#e8a24a"
+
+git:
+  paging:
+    colorArg: always
+    pager: delta --dark --paging=never
+  autoFetch: true
+  autoRefresh: true
+  branchLogCmd: "git log --graph --color=always --abbrev-commit --decorate --date=relative --pretty=medium {{branchName}} --"
+
+os:
+  editPreset: nvim

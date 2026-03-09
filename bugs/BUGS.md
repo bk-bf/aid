@@ -8,12 +8,6 @@
 **Repro**: open enough tabs that bufferline overflows the available width; a `[+N]` count appears at the right edge of the tab bar indicating how many tabs are off-screen.
 **Notes**: `left_trunc_marker`/`right_trunc_marker` options control the arrow icon only — the count is hardcoded in `get_trunc_marker()` in `bufferline/ui.lua` and always renders when `count > 0`. No public option suppresses it. Per PHILOSOPHY.md §"Fixing seams that aid didn't create" — this exists regardless of aid being installed; the fix belongs upstream. Report to [akinsho/bufferline.nvim](https://github.com/akinsho/bufferline.nvim) requesting a `show_trunc_marker` / `show_trunc_count` option.
 
-### BUG-014: pressing Tab in treemux sidebar opens file inside sidebar pane
-
-**Status**: open
-**Repro**: focus the treemux sidebar pane; press `<Tab>`; a file buffer opens inside the sidebar pane instead of the main editor pane.
-**Notes**: `<Tab>` → `BufferLineCycleNext` is active in the sidebar's nvim instance because it loads the full plugin set via lazy. Fix: unmap `<Tab>` in `treemux_init.lua` after setup. See [bugs/BUG-014.md](bugs/BUG-014.md).
-
 <!-- template:
 ### BUG-N: title
 **Status**: open | investigating | blocked
@@ -31,6 +25,10 @@
 **Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [watching/BUG-015.md](watching/BUG-015.md).
 
 ## Closed
+
+### BUG-014: pressing Tab in treemux sidebar opens file inside sidebar pane
+
+**Status**: closed — fixed 2026-03 — see [archive/BUG-014.md](archive/BUG-014.md)
 
 ### BUG-017: prefix+Tab does not reopen the sidebar after it is closed
 

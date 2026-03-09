@@ -22,6 +22,47 @@ Archived ADRs (superseded and no longer referenced by active work) are in `archi
 
 ---
 
+### ADR-015: bufferline redraw strategy — receiver-side `BufEnter` autocmd
+
+**Date**: 2026-03-09
+**Status**: Made
+
+**Context**: bufferline's rendered tabline goes stale when buffers are opened via
+msgpack-RPC from the treemux sidebar. Three distinct RPC commands are used depending on
+context: `tabnew <file>` (new buffer), `buffer N` (dedup — file already loaded), and
+`edit <file>` (neo-tree path). Each fires a different set of nvim events, which caused
+the original `{ "BufAdd", "TabNew" }` autocmd to miss the `buffer N` and `edit`-on-existing-buffer cases.
+
+**Decision**: Fix on the *receiver side* (main nvim `init.lua`) by adding `BufEnter` to
+the autocmd event list:
+
+```lua
+vim.api.nvim_create_autocmd({ "BufAdd", "BufEnter", "TabNew" }, {
+  callback = function() vim.cmd("redrawtabline") end,
+})
+```
+
+**Why not unify the send side ("crossroad" alternative)**: The alternative was to route
+all three RPC code paths through a single function in `treemux_init.lua` that opens the
+file and calls `redrawtabline` atomically. This would require defining a receiver-side
+Lua function in `init.lua`, calling it via `nvim_exec_lua` from `treemux_init.lua`, and
+repeating similar changes for the neo-tree path. It would add cross-file coupling for a
+problem that is fundamentally about the receiver not redrawing after RPC commands.
+Furthermore, it would still leave the neo-tree path and any future open paths uncovered
+unless similarly modified.
+
+`BufEnter` is semantically correct — "a buffer became active, ensure the tab bar
+reflects it" — and fires regardless of how the buffer switch was triggered (RPC or
+normal keypress). `redrawtabline` costs ~0.1 ms and is idempotent; the extra calls on
+normal keypresses are harmless. The receiver-side fix requires no changes to the send
+side and covers all current and future open paths in one place.
+
+**Scope of the same fix**: `redrawtabline` was also missing from the `<leader>tb`
+tab-bar toggle, where `showtabline` was changed without a subsequent redraw. Fixed at
+the same time.
+
+---
+
 ### ADR-013: Sidebar architecture — treemux stays
 
 **Date**: 2026-03-09

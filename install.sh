@@ -36,27 +36,18 @@ else
   echo "==> TPM already present"
 fi
 
-# ── 3. Treemux plugin (via TPM headless install) ──────────────────────────────
+# ── 3. Treemux plugin ────────────────────────────────────────────────────────
+# Clone directly — TPM's headless install_plugins reads @plugin options from a
+# running tmux server and a bare server (no tmux.conf loaded) has none set.
 TREEMUX_DIR="$AID/tmux/plugins/treemux"
 if [[ ! -d "$TREEMUX_DIR" ]]; then
-  echo "==> Installing treemux via TPM..."
-  # TPM headless install requires a running tmux server on the target socket.
-  # Use the isolated aid socket so we never touch the user's tmux setup.
-  #
-  # We do NOT load tmux.conf here: it sources palette.conf (not yet generated)
-  # and its `run tpm/tpm` line would re-invoke TPM mid-install. A bare server
-  # with TMUX_PLUGIN_MANAGER_PATH in its environment is all TPM needs.
-  mkdir -p "$AID/tmux/plugins"
-  tmux -L aid new-session -d -s _aid_install \
-    -e "TMUX_PLUGIN_MANAGER_PATH=$AID/tmux/plugins/" 2>/dev/null || true
-  TMUX_PLUGIN_MANAGER_PATH="$AID/tmux/plugins/" \
-    "$TPM_DIR/bin/install_plugins"
-  tmux -L aid kill-server 2>/dev/null || true
+  echo "==> Installing treemux..."
+  git clone https://github.com/kiyoon/treemux "$TREEMUX_DIR"
   # Patch treemux's watch script with our custom version
   ln -sf "$AID/nvim-treemux/watch_and_update.sh" \
          "$TREEMUX_DIR/scripts/tree/watch_and_update.sh"
 else
-  echo "==> treemux plugin already present"
+  echo "==> treemux already present"
 fi
 
 # ── 4. Symlinks ───────────────────────────────────────────────────────────────

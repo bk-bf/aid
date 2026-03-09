@@ -21,3 +21,8 @@ tmux/plugins/*
 nvim/site/
 nvim/undo/
 nvim/lazy/
+
+# ── lazygit ───────────────────────────────────────────────────────────────────
+# lazygit config is redirected to ~/.config/aid/lazygit/ via LG_CONFIG_FILE.
+# Any lazygit/ directory inside $AID_DIR is a stray write — ignore it.
+lazygit/

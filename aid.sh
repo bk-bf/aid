@@ -253,7 +253,7 @@ tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/ensure_treemux.sh"
 # To kill the session entirely: close the tmux window or run `aid kill`.
 dbg "respawning editor pane into nvim loop"
 tmux -L aid respawn-pane -k -t "$editor_pane_id" \
-  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
+  "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") LG_CONFIG_FILE=$(printf '%q' "$HOME/.config/aid/lazygit/config.yml") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
 
 dbg "attaching to session=$session"
 attach_or_switch "$session"

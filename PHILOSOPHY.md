@@ -1,7 +1,5 @@
+<!-- LOC cap: 344 (source: 2457, ratio: 0.14, updated: 2026-03-09) -->
 # Philosophy
-
-**Branch**: dev-docs  
-**Updated**: 2026-03-07
 
 ## Origin
 

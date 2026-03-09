@@ -1,3 +1,4 @@
+<!-- LOC cap: 344 (source: 2457, ratio: 0.14, updated: 2026-03-09) -->
 # Roadmap
 
 ## Phase 1 — Harden (fix before any promotion)

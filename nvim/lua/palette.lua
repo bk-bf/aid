@@ -36,4 +36,12 @@ M.fg          = "#ffffff"   -- universal foreground (all text on colored bg)
 M.cursor_fg   = "#000000"   -- cursor text color
 M.none        = "none"      -- transparent background sentinel
 
+-- ── Completion popup (nvim-cmp) ───────────────────────────────────────────
+M.cmp_bg      = "#1e1e2e"   -- popup and docs float background
+M.cmp_border  = "#7c6f9f"   -- border color (muted purple, matches accent family)
+M.cmp_sel_bg  = "#3a3450"   -- selected item background
+M.cmp_match   = "#caa5f7"   -- fuzzy-match character highlight (bright lavender)
+M.cmp_ghost   = "#504060"   -- ghost text / deprecated strikethrough
+M.cmp_menu    = "#7a6e96"   -- source label text (dim)
+
 return M

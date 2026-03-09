@@ -1063,9 +1063,18 @@ require("lazy").setup({
       "hrsh7th/cmp-path",
       "hrsh7th/cmp-nvim-lsp-signature-help", -- function parameter hints in the popup
       "garymjr/nvim-snippets",               -- vim.snippet adapter (nvim 0.10+ built-in)
+      "onsails/lspkind.nvim",                -- VSCode-style kind icons
     },
     config = function()
-      local cmp = require("cmp")
+      local cmp     = require("cmp")
+      local lspkind = require("lspkind")
+
+      -- Kind icons — VSCode codicons subset, same set LazyVim ships
+      lspkind.init({
+        mode   = "symbol_text",   -- icon + text label (e.g. "  Function")
+        preset = "codicons",
+      })
+
       cmp.setup({
         -- Show the popup automatically as you type; pre-select the first item so
         -- <CR> confirms immediately without a separate <Tab> to select.
@@ -1074,6 +1083,42 @@ require("lazy").setup({
           expand = function(args)
             vim.snippet.expand(args.body) -- nvim 0.10+ built-in snippet engine
           end,
+        },
+        -- Rounded borders on both the completion list and the docs float,
+        -- matching the aid palette (highlight groups set in apply_palette()).
+        window = {
+          completion    = cmp.config.window.bordered({
+            border        = "rounded",
+            winhighlight  = "Normal:CmpNormal,FloatBorder:CmpBorder,CursorLine:CmpSel,Search:None",
+            scrollbar     = false,
+          }),
+          documentation = cmp.config.window.bordered({
+            border        = "rounded",
+            winhighlight  = "Normal:CmpNormal,FloatBorder:CmpBorder",
+            scrollbar     = false,
+          }),
+        },
+        -- VSCode-style kind icons + right-aligned source label (e.g. "[LSP]")
+        formatting = {
+          fields   = { "kind", "abbr", "menu" },
+          expandable_indicator = true,
+          format   = lspkind.cmp_format({
+            mode           = "symbol_text",
+            maxwidth       = 50,
+            ellipsis_char  = "…",
+            show_labelDetails = true,
+            before = function(entry, vim_item)
+              -- Source label shown at the right edge of each row
+              vim_item.menu = ({
+                nvim_lsp              = "[LSP]",
+                nvim_lsp_signature_help = "[Sig]",
+                snippets              = "[Snip]",
+                buffer                = "[Buf]",
+                path                  = "[Path]",
+              })[entry.source.name] or ""
+              return vim_item
+            end,
+          }),
         },
         mapping = cmp.mapping.preset.insert({
           ["<C-Space>"] = cmp.mapping.complete(), -- trigger completion manually
@@ -1193,6 +1238,52 @@ function _G.apply_palette()
   hl(0, "BufferLineHintDiagnosticVisible", { fg = p.tab_fg, bg = p.tab_bg })
   hl(0, "BufferLineTruncMarker", { fg = p.tab_fg, bg = p.tab_bg })
   hl(0, "BufferLineOffsetSeparator", { fg = p.tab_bg, bg = p.tab_bg })
+
+  -- ── nvim-cmp completion popup ─────────────────────────────────────────
+  -- Window chrome: popup + docs float share the same dark bg; border uses
+  -- the muted-purple cmp_border; selected row gets a slightly lighter bg.
+  hl(0, "CmpNormal",              { bg = p.cmp_bg })
+  hl(0, "CmpBorder",              { fg = p.cmp_border, bg = p.cmp_bg })
+  hl(0, "CmpSel",                 { bg = p.cmp_sel_bg, bold = true })
+  -- Item text
+  hl(0, "CmpItemAbbr",            { fg = p.fg })
+  hl(0, "CmpItemAbbrDeprecated",  { fg = p.cmp_ghost, strikethrough = true })
+  hl(0, "CmpItemAbbrMatch",       { fg = p.cmp_match, bold = true })
+  hl(0, "CmpItemAbbrMatchFuzzy",  { fg = p.cmp_match, bold = true })
+  hl(0, "CmpItemMenu",            { fg = p.cmp_menu, italic = true })
+  hl(0, "CmpGhostText",           { fg = p.cmp_ghost })
+  -- Kind icons: one color per completion kind, drawn from the aid palette
+  -- and common terminal-safe hues.  Mirrors the LazyVim/tokyonight pattern.
+  local kind_hl = {
+    Text          = { fg = p.fg },
+    Method        = { fg = p.purple },
+    Function      = { fg = p.purple },
+    Constructor   = { fg = p.lavender },
+    Field         = { fg = p.lavender },
+    Variable      = { fg = p.lavender },
+    Class         = { fg = "#e5c07b" },   -- warm yellow
+    Interface     = { fg = "#e5c07b" },
+    Module        = { fg = p.blue },
+    Property      = { fg = p.lavender },
+    Unit          = { fg = "#e5c07b" },
+    Value         = { fg = p.git_add },
+    Enum          = { fg = "#e5c07b" },
+    Keyword       = { fg = p.purple },
+    Snippet       = { fg = p.git_chg },
+    Color         = { fg = p.git_add },
+    File          = { fg = p.fg },
+    Reference     = { fg = p.lavender },
+    Folder        = { fg = p.blue },
+    EnumMember    = { fg = p.lavender },
+    Constant      = { fg = "#e5c07b" },
+    Struct        = { fg = "#e5c07b" },
+    Event         = { fg = p.git_chg },
+    Operator      = { fg = p.fg },
+    TypeParameter = { fg = p.lavender },
+  }
+  for kind, opts in pairs(kind_hl) do
+    hl(0, "CmpItemKind" .. kind, opts)
+  end
 
   vim.cmd("redrawtabline")
 end

@@ -6,24 +6,24 @@ gui:
   nerdFontsVersion: "3"
   theme:
     activeBorderColor:
-      - "#e8a24a"
+      - "#C78D6B"
       - bold
     inactiveBorderColor:
       - "#3b4048"
     optionsTextColor:
-      - "#61afef"
+      - "#CAA5F7"
     selectedLineBgColor:
       - "#2c313a"
     cherryPickedCommitBgColor:
       - "#3e4451"
     cherryPickedCommitFgColor:
-      - "#e8a24a"
+      - "#C78D6B"
     unstagedChangesColor:
       - "#e06c75"
     defaultFgColor:
       - "#abb2bf"
     searchingActiveBorderColor:
-      - "#e8a24a"
+      - "#C78D6B"
 
 git:
   paging:

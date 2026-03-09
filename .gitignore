@@ -22,3 +22,6 @@ opencode/opencode.db-shm
 opencode/opencode.db-wal
 opencode/models.json
 opencode/version
+
+# ── gitstatus binary cache (downloaded by shell prompt plugins, e.g. p10k) ───
+gitstatus/

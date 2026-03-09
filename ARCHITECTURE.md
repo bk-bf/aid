@@ -24,7 +24,7 @@ boot.sh (curl | bash)
         │       ~/.config/aid/treemux                              → aid/nvim-treemux/
         │       $AID_DIR/tmux/plugins/treemux/.../watch_and_update.sh → aid/nvim-treemux/
         │       ~/.local/bin/aid                                   → aid/aid.sh
-        │       (main nvim: no symlink — aid.sh sets XDG_CONFIG_HOME=$AID_DIR; DATA/STATE/CACHE go to ~/.local/{share,state}|.cache/aid)
+        │       (main nvim: no symlink — XDG_CONFIG_HOME=$AID_DIR is injected inline on the nvim respawn-pane command; DATA/STATE/CACHE go to ~/.local/{share,state}|.cache/aid)
         ├── 5. nvim-treemux headless lazy sync  (NVIM_APPNAME=treemux) ← spinner
         ├── 5b. main nvim headless lazy sync    (NVIM_APPNAME=nvim)    ← spinner
         └── 6. (no shell injection — aid is a standalone script in PATH)
@@ -59,7 +59,6 @@ aid.sh
    │       AID_IGNORE          → comma-separated .aidignore entries
    │       OPENCODE_CONFIG_DIR → <AID_DIR>/opencode
    │       NVIM_APPNAME        → nvim
-   │       XDG_CONFIG_HOME     → <AID_DIR>            (nvim config source → AID_DIR/nvim/)
    │       XDG_DATA_HOME       → ~/.local/share/aid   (nvim plugin data → ~/.local/share/aid/nvim/)
    │       XDG_STATE_HOME      → ~/.local/state/aid   (nvim shada/swap  → ~/.local/state/aid/nvim/)
    │       XDG_CACHE_HOME      → ~/.cache/aid         (nvim cache       → ~/.cache/aid/nvim/)
@@ -95,14 +94,13 @@ The editor pane is respawned via `respawn-pane -k` directly into the nvim restar
 
 ## Environment variables (tmux server scope)
 
-Set via `tmux -L aid set-environment -g` before any pane is created. All child shells inherit them automatically.
+Set via `tmux -L aid set-environment -g` before any pane is created. All child shells inherit them automatically. `XDG_CONFIG_HOME` is **not** global — it is injected inline only on the nvim `respawn-pane` command and the treemux `@treemux-nvim-command` option, so it does not leak into opencode or other panes.
 
 | Variable | Value | Purpose |
 |---|---|---|
 | `AID_DIR` | path to `aid/main/` | Lets scripts locate the repo without assumptions about install path |
 | `AID_IGNORE` | comma-separated patterns | Populated from `.aidignore` (found by walking up from `$PWD`) |
-| `NVIM_APPNAME` | `nvim` | Main editor; with `XDG_CONFIG_HOME=$AID_DIR` resolves config to `$AID_DIR/nvim` |
-| `XDG_CONFIG_HOME` | `$AID_DIR` | nvim config → `$AID_DIR/nvim/` — no symlink in `~/.config/` required |
+| `NVIM_APPNAME` | `nvim` | Main editor appname; with `XDG_CONFIG_HOME=$AID_DIR` (inline) resolves config to `$AID_DIR/nvim` |
 | `XDG_DATA_HOME` | `~/.local/share/aid` | nvim plugin data / lazy.nvim → `~/.local/share/aid/nvim/` — not `~/.local/share/nvim/` |
 | `XDG_STATE_HOME` | `~/.local/state/aid` | nvim shada / swap / undo → `~/.local/state/aid/nvim/` — not `~/.local/state/nvim/` |
 | `XDG_CACHE_HOME` | `~/.cache/aid` | nvim cache → `~/.cache/aid/nvim/` — not `~/.cache/nvim/` |

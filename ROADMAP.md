@@ -27,7 +27,7 @@
 
 ## Done
 
-- [x] **2026-03-10**: BUG-022 — tmux status bar goes blank when switching away from nvim pane; `tpipeline_restore=1` enables tpipeline's save/restore path so `palette.conf` fallback is restored on `FocusLost`; `#{pane_current_command}` added to `status-right` fallback so active pane name (`opencode`, `nvim`) is always visible
+- [x] **2026-03-10**: BUG-022 — tmux status bar goes blank when switching away from nvim pane; `tpipeline_split=0` confines tpipeline to `status-left` only; vimbridge cat embedded in `status-left` via `gen-tmux-palette.sh`; `status-right` permanently owned by `palette.conf` with three-dot pane indicator (●●●, active pane highlighted) plus clock/hostname
 - [x] **2026-03-09**: T-005 — language tooling layer; mason.nvim (:Mason UI, ~700 packages), mason-lspconfig.nvim (automatic_enable bridges mason → lspconfig), conform.nvim (format_on_save, LSP fallback, `<leader>F`), nvim-lint (BufWritePost trigger), nvim-dap + nvim-dap-ui + mason-nvim-dap (auto-open UI, `handlers={}` default configs, full keymap set); no tools pre-installed — users install what they need via `:Mason`
 - [x] **2026-03-09**: T-023 / BUG-014 — `<Tab>` in treemux sidebar opens file inside sidebar pane; fixed: `<Tab>` remapped to `<Nop>` in `treemux_init.lua` after plugin setup
 - [x] **2026-03-09**: T-007 — self-contained theme system; palette centralized in `nvim/lua/palette.lua`; bufferline, statusline, treemux highlights, and tmux status bar all driven from single source; `tokyonight` dependency removed from treemux; `gen-tmux-palette.sh` renders tmux colors at session start

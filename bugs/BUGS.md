@@ -35,15 +35,13 @@
 
 ### BUG-022: tmux status bar goes blank when switching away from nvim pane
 
-**Status**: closed — fixed 2026-03-10 — two-part fix
+**Status**: closed — fixed 2026-03-10
 
 **Repro**: launch `aid`; focus the nvim editor pane; switch to the opencode or treemux pane — the tmux status bar collapses to a plain blue bar with only session name and clock. All mode/file/git/LSP info disappears and the right side is empty.
 
-**Root cause**: `vim-tpipeline` defaults to `g:tpipeline_restore = 0`. With restore disabled, tpipeline sets `status-right` to `#(cat ...vimbridge-R)` on startup and never clears it on `FocusLost`. When nvim is not the active pane, the vimbridge file contains stale/empty content, so the cat returns nothing — right side renders blank. The `palette.conf` fallback string is never restored because tpipeline's restore path is not enabled.
+**Root cause**: `vim-tpipeline` with `autoembed=1` spawns a persistent background bash job that runs a continuous loop: on every statusline update it writes to the vimbridge files **and** runs `tmux set status-right '#(cat ...vimbridge-R)'`. This loop runs for the entire lifetime of nvim. Any attempt to set `status-right` from outside (palette.conf, pane-focus-in hook, etc.) is immediately overwritten by the tpipeline loop within milliseconds. `tpipeline_restore=1` also fails: `s:restore_right` captures `status-right` at `fork_job()` time, but on each nvim restart the value being captured is still the stale vimbridge cat string from the previous run.
 
-**Fix**:
-1. `gen-tmux-palette.sh` — added `#{pane_current_command}` to `status-right` so the fallback bar shows the active pane name (e.g. `opencode`, `nvim`) when it is restored.
-2. `nvim/init.lua` — set `vim.g.tpipeline_restore = 1` in the tpipeline config block. This enables tpipeline's save/restore path: it saves `status-left`/`status-right` before overriding them on `FocusGained`, and restores them on `FocusLost`. The nvim restart loop (`while true; do nvim ...; done` in `aid.sh`) means the crash case is covered — tpipeline re-saves the palette.conf string on every respawn.
+**Fix**: set `g:tpipeline_split = 0` in `nvim/init.lua`. This makes tpipeline use only `status-left` (never `status-right`). The vimbridge cat is embedded directly in `status-left` via `gen-tmux-palette.sh` (`#(cat #{socket_path}-\#{session_id}-vimbridge)`; `status-left-length` raised to 180). `status-right` is then permanently owned by `palette.conf` and always renders the three-dot pane indicator (●●●, active pane purple / inactive dim) plus clock and hostname — regardless of which pane is focused.
 
 ### BUG-021: LSP/treesitter semantic tokens bleed fg color over bufferline buffer name
 

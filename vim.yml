@@ -1,0 +1,9 @@
+# Selene standard library for Neovim Lua.
+# Referenced by selene.toml via std = "vim".
+# Place this file alongside selene.toml in the project root.
+base: lua51
+globals:
+  vim:
+    any: true
+  jit:
+    any: true

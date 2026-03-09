@@ -1,12 +1,10 @@
 # ── personal dev tooling (not for distribution) ──────────────────────────────
 # .nvim.lua      — per-developer exrc (formatter/linter wiring, local overrides)
-# selene.toml    — selene linter config (only meaningful if selene is installed)
 # stylua.toml    — StyLua formatter config
 # .luarc.json    — LuaLS workspace config (suppresses false-positive vim globals)
 # opencode.json  — per-project opencode LSP/config (bootstrapped from template)
 .nvim.lua
 !nvim/templates/.nvim.lua
-selene.toml
 stylua.toml
 .luarc.json
 opencode.json

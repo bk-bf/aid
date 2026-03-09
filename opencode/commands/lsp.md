@@ -152,12 +152,15 @@ To add initialization options or disable a server, edit opencode.json directly.
 Docs: https://opencode.ai/docs/lsp/
 ```
 
+For Lua projects: selene requires a `vim.yml` alongside `selene.toml` in the project root.
+Aid ships one at `$HOME/.local/share/aid/main/vim.yml` — copy it into your project root if needed.
+
 ---
 
 # Diagnose mode
 
 You are here because either `$ARGUMENTS` is non-empty (specific file), or `$ARGUMENTS` is empty and `opencode.json` already has LSP config (all files).
-Goal: collect LSP diagnostics, show them, and offer to fix errors and warnings.
+Goal: run CLI linters directly against the target files and report real diagnostics — no LSP attachment required.
 
 ---
 
@@ -184,70 +187,199 @@ If `$ARGUMENTS` is empty, discover all source files in the project:
 ```bash
 find . -type f \( -name "*.lua" -o -name "*.py" -o -name "*.go" -o -name "*.rs" \
   -o -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" \
-  -o -name "*.sh" -o -name "*.bash" -o -name "*.cs" -o -name "*.java" \
-  -o -name "*.zig" -o -name "*.nix" \) \
+  -o -name "*.sh" -o -name "*.bash" \) \
   | grep -v node_modules | grep -v .git | grep -v lazy | grep -v mason \
   | sort
 ```
 
 ---
 
-## Step D2 — Read files and collect diagnostics
+## Step D2 — Detect languages and available CLI tools
 
-Read each target file. OpenCode's LSP client will attach to each file and collect diagnostics automatically.
+From the target file list, determine which languages are present by extension.
 
-For each diagnostic reported, record:
-- File path (relative to cwd)
-- Line number
-- Severity (`ERROR`, `WARN`, `INFO`, `HINT`)
-- Message
+For each language present, check whether the corresponding CLI tool exists in the Mason bin directory:
+
+```bash
+ls "$HOME/.local/share/aid/nvim/mason/bin/"
+```
+
+Use this table to match language → tool → invocation:
+
+| Extension(s) | Mason binary | Notes |
+|---|---|---|
+| `*.lua` | `lua-language-server` | Runs per directory; writes JSON to `--logpath` |
+| `*.lua` | `selene` | Runs per file; requires `selene.toml` in project root |
+| `*.go` | `gopls` | `gopls check <files>` |
+| `*.py` | `pyright` | `pyright --outputjson <dir>` |
+| `*.rs` | `rust-analyzer` | `rust-analyzer diagnostics` in project root |
+| `*.sh`, `*.bash` | `shellcheck` | `shellcheck -f json <files>` |
+| `*.ts`, `*.tsx`, `*.js`, `*.jsx` | `typescript-language-server` | No batch mode — note to user (see below) |
+
+If a tool is not present in the Mason bin directory, skip that language silently and record it as "not checked" for the summary.
 
 ---
 
-## Step D3 — Print diagnostic summary
+## Step D3 — Run CLI linters
 
-If no diagnostics were found across all target files, print:
+Run each applicable tool. Collect all output. Do not stop on non-zero exit — linters exit non-zero when they find issues, which is expected.
+
+### Lua — lua-language-server
+
+`lua-language-server --check` operates on a **directory**, not individual files. For each unique directory that contains `.lua` files in the target list, run:
+
+```bash
+LUALS_LOGDIR=$(mktemp -d /tmp/luals-check-XXXXXX)
+~/.local/share/aid/nvim/mason/bin/lua-language-server \
+  --check <lua_dir> \
+  --checklevel=Warning \
+  --check_format=json \
+  --logpath "$LUALS_LOGDIR"
+# If a .luarc.json exists in the project root, add:
+#   --configpath <path/to/.luarc.json>
+```
+
+Then read `$LUALS_LOGDIR/check.json`. It is a JSON array. Each entry has the shape:
+
+```json
+{
+  "file": "file:///absolute/path/to/file.lua",
+  "diagnostics": [
+    {
+      "range": { "start": { "line": 12, "character": 0 }, "end": { ... } },
+      "severity": 1,
+      "message": "Undefined global `foo`"
+    }
+  ]
+}
+```
+
+Severity mapping: `1` = Error, `2` = Warning, `3` = Information, `4` = Hint.
+Line numbers in the JSON are **0-indexed** — add 1 for display.
+
+Clean up: `rm -rf "$LUALS_LOGDIR"` after reading.
+
+### Lua — selene
+
+Only run selene if `selene.toml` exists in the project root. Run against all `.lua` target files at once:
+
+```bash
+~/.local/share/aid/nvim/mason/bin/selene \
+  --config <path/to/selene.toml> \
+  --display-style=Json \
+  <lua_file1> <lua_file2> ...
+```
+
+Each line of stdout is a JSON object:
+
+```json
+{
+  "severity": "Warning",
+  "code": "unused_variable",
+  "message": "palette_path is assigned a value, but never used",
+  "primary_label": {
+    "filename": "nvim/lua/sync.lua",
+    "span": { "start_line": 129, "start_column": 8, ... }
+  }
+}
+```
+
+Note: `start_line` is **0-indexed** — add 1 for display.
+
+### Go — gopls
+
+```bash
+~/.local/share/aid/nvim/mason/bin/gopls check <go_file1> <go_file2> ...
+```
+
+Output is plain text, one diagnostic per line: `file:line:col: message`. Parse accordingly.
+
+### Python — pyright
+
+```bash
+~/.local/share/aid/nvim/mason/bin/pyright --outputjson .
+```
+
+The JSON output has shape `{ "generalDiagnostics": [ { "file": "...", "range": {...}, "severity": "error"|"warning"|"information", "message": "..." } ] }`.
+
+### Rust — rust-analyzer
+
+Run from the project root (where `Cargo.toml` is):
+
+```bash
+~/.local/share/aid/nvim/mason/bin/rust-analyzer diagnostics
+```
+
+Output is JSON lines, each with `{ "severity": "error"|"warning", "message": "...", "location": { "file": "...", "line": N } }`.
+
+### Shell — shellcheck
+
+```bash
+~/.local/share/aid/nvim/mason/bin/shellcheck -f json <sh_file1> <sh_file2> ...
+```
+
+Output is a JSON array: `[ { "file": "...", "line": N, "severity": "error"|"warning"|"info"|"style", "message": "..." } ]`.
+
+### TypeScript / JavaScript — no batch mode
+
+If `.ts`, `.tsx`, `.js`, or `.jsx` files are present but `typescript-language-server` has no batch mode. Print a note:
 
 ```
-No LSP diagnostics found.
+TypeScript/JavaScript: no batch diagnostic mode available.
+Run 'npx tsc --noEmit' in your project root for type checking.
+```
+
+---
+
+## Step D4 — Collect and print unified diagnostic summary
+
+Merge all tool outputs into a single list. For each diagnostic record:
+- File path (relative to cwd)
+- Line number (1-indexed)
+- Severity: `ERROR`, `WARN`, `INFO`, `HINT`
+- Source tool: `lua-ls`, `selene`, `gopls`, `pyright`, `rust-analyzer`, `shellcheck`
+- Message
+
+Deduplicate: if `lua-language-server` and `selene` both report the same line in the same file, keep both (they catch different things).
+
+If no diagnostics were found across all tools, print:
+
+```
+No diagnostics found.
+Tools run: <tool1>, <tool2>, ...
 ```
 
 Then stop.
 
-Otherwise print a summary grouped by file, sorted by severity (ERROR first, then WARN, INFO, HINT):
+Otherwise print grouped by file, sorted by line number within each file, errors before warnings:
 
 ```
-LSP diagnostics:
+Diagnostics:
 
-<relative/path/to/file.lua>
-  line 12  ERROR  undefined global 'foo'
-  line 34  WARN   unused variable 'bar'
+nvim/lua/sync.lua
+  line 129  WARN  [selene/unused_variable]  palette_path is assigned a value, but never used
 
-<relative/path/to/other.lua>
-  line 5   ERROR  expected ')', got 'end'
+nvim/init.lua
+  line 306  WARN  [lua-ls]  undefined field 'get' on type 'Option<boolean>'
 
-Total: <N> error(s), <N> warning(s), <N> info, <N> hint(s) across <N> file(s).
+Total: <N> error(s), <N> warning(s) across <N> file(s).
+Tools run: lua-language-server, selene
+Not checked (tool not in Mason): gopls, pyright, rust-analyzer, shellcheck
 ```
 
 Then ask:
 
 ```
-Fix all diagnostics? [Y/n]
+Fix all errors and warnings? [Y/n]
 ```
 
-If the user answers `n` or `N`, print:
-
-```
-No changes made.
-```
-
-Then stop.
+If the user answers `n` or `N`, print `No changes made.` and stop.
 
 ---
 
-## Step D4 — Fix diagnostics
+## Step D5 — Fix diagnostics
 
-For each file that has diagnostics (ERROR and WARN only — do not auto-fix INFO or HINT unless the user explicitly asks), apply fixes:
+For each file with ERROR or WARN diagnostics, apply fixes:
 
 - Read the file carefully
 - Fix each reported diagnostic at the correct line
@@ -255,19 +387,16 @@ For each file that has diagnostics (ERROR and WARN only — do not auto-fix INFO
 - Prefer minimal, targeted fixes — do not refactor surrounding code
 - After editing, re-read the file to confirm the fix did not introduce new issues
 
+Do not auto-fix INFO or HINT unless the user explicitly asks.
+
 ---
 
-## Step D5 — Print fix summary
+## Step D6 — Print fix summary
 
 ```
 Fixed:
-  <relative/path/to/file.lua>  — <N> issue(s) resolved
-  ...
+  nvim/lua/sync.lua  — 1 issue resolved
+  nvim/init.lua      — 1 issue resolved
 
-Skipped (INFO/HINT — fix manually if needed):
-  <relative/path/to/file.lua>
-    line 8  HINT  <message>
-  ...
-
-Done. Re-run /lsp <file> to verify no new diagnostics were introduced.
+Done. Re-run /lsp to verify no new diagnostics were introduced.
 ```

@@ -1,0 +1,16 @@
+std = "vim"
+
+[lints]
+# _G writes are used for cross-module callbacks (apply_palette, setup_statusline)
+global_usage = "allow"
+# vim.loop is used in the lazy.nvim bootstrap; vim.uv is preferred elsewhere
+deprecated = "warn"
+# \xNN hex escapes are valid in LuaJIT / Lua 5.2+ but selene flags them as invalid
+# when not compiled with LuaJIT support — suppress the false positive
+bad_string_escape = "allow"
+# lazy.nvim plugin specs are intentionally mixed tables (list + keyed fields);
+# this is the established convention and not a real bug
+mixed_table = "allow"
+# forward-declared functions (apply_palette etc.) are defined after first use
+# in the same file — selene can't track this across the file
+undefined_variable = "allow"

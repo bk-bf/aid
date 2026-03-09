@@ -19,7 +19,7 @@ echo "==> aid install: $AID"
 
 # ── 1. Dependencies ──────────────────────────────────────────────────────────
 # Arch/CachyOS: pynvim is required by the treemux watch script
-if command -v pacman &>/dev/null; then
+if command -v pacman &>/dev/null && ! python3 -c "import pynvim" &>/dev/null; then
   echo "==> Installing pynvim..."
   sudo pacman -S --needed --noconfirm python-pynvim
 fi

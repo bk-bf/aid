@@ -239,7 +239,7 @@ dbg "editor_pane_id=$editor_pane_id"
 # (no shell prompt — avoids zsh intercept, send-keys mangling, autocorrect).
 dbg "splitting opencode pane"
 tmux -L aid split-window -h -p 29 -t "$editor_pane_id" \
-  "XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode $(printf '%q' "$launch_dir")"
+  "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode $(printf '%q' "$launch_dir")"
 opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
   | sort -k2 -n | tail -1 | cut -d' ' -f1)
 dbg "opencode_pane_id=$opencode_pane_id"

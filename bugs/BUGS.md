@@ -32,6 +32,10 @@
 
 ## Closed
 
+### BUG-019: .aidignore plain names hide files whose names contain the pattern as a substring
+
+**Status**: closed — fixed 2026-03 — see [archive/BUG-019.md](archive/BUG-019.md)
+
 ### BUG-014: pressing Tab in treemux sidebar opens file inside sidebar pane
 
 **Status**: closed — fixed 2026-03 — see [archive/BUG-014.md](archive/BUG-014.md)

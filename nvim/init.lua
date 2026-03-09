@@ -456,6 +456,32 @@ require("lazy").setup({
         diagnostic                = { fg = p.tab_fg, bg = p.tab_bg },
         diagnostic_selected       = { fg = p.tab_fg, bg = p.tab_sel },
         diagnostic_visible        = { fg = p.tab_fg, bg = p.tab_bg },
+        -- Per-severity groups: without these bufferline inherits DiagnosticError/Warn
+        -- fg colors and tints the buffer name when LSP reports diagnostics (BUG-021).
+        error                     = { fg = p.tab_fg, bg = p.tab_bg },
+        error_selected            = { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true },
+        error_visible             = { fg = p.tab_fg, bg = p.tab_bg },
+        error_diagnostic          = { fg = p.tab_fg, bg = p.tab_bg },
+        error_diagnostic_selected = { fg = p.tab_fg, bg = p.tab_sel },
+        error_diagnostic_visible  = { fg = p.tab_fg, bg = p.tab_bg },
+        warning                   = { fg = p.tab_fg, bg = p.tab_bg },
+        warning_selected          = { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true },
+        warning_visible           = { fg = p.tab_fg, bg = p.tab_bg },
+        warning_diagnostic          = { fg = p.tab_fg, bg = p.tab_bg },
+        warning_diagnostic_selected = { fg = p.tab_fg, bg = p.tab_sel },
+        warning_diagnostic_visible  = { fg = p.tab_fg, bg = p.tab_bg },
+        info                      = { fg = p.tab_fg, bg = p.tab_bg },
+        info_selected             = { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true },
+        info_visible              = { fg = p.tab_fg, bg = p.tab_bg },
+        info_diagnostic          = { fg = p.tab_fg, bg = p.tab_bg },
+        info_diagnostic_selected = { fg = p.tab_fg, bg = p.tab_sel },
+        info_diagnostic_visible  = { fg = p.tab_fg, bg = p.tab_bg },
+        hint                      = { fg = p.tab_fg, bg = p.tab_bg },
+        hint_selected             = { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true },
+        hint_visible              = { fg = p.tab_fg, bg = p.tab_bg },
+        hint_diagnostic          = { fg = p.tab_fg, bg = p.tab_bg },
+        hint_diagnostic_selected = { fg = p.tab_fg, bg = p.tab_sel },
+        hint_diagnostic_visible  = { fg = p.tab_fg, bg = p.tab_bg },
         trunc_marker              = { fg = p.tab_fg, bg = p.tab_bg },
         offset_separator          = { fg = p.tab_bg, bg = p.tab_bg },
       },
@@ -946,6 +972,31 @@ function _G.apply_palette()
   hl(0, "BufferLineDiagnostic",                { fg = p.tab_fg, bg = p.tab_bg })
   hl(0, "BufferLineDiagnosticSelected",        { fg = p.tab_fg, bg = p.tab_sel })
   hl(0, "BufferLineDiagnosticVisible",         { fg = p.tab_fg, bg = p.tab_bg })
+  -- Per-severity: prevents LSP diagnostic colors tinting the buffer name (BUG-021)
+  hl(0, "BufferLineError",                      { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineErrorSelected",              { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true })
+  hl(0, "BufferLineErrorVisible",               { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineErrorDiagnostic",            { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineErrorDiagnosticSelected",    { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineErrorDiagnosticVisible",     { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineWarning",                    { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineWarningSelected",            { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true })
+  hl(0, "BufferLineWarningVisible",             { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineWarningDiagnostic",          { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineWarningDiagnosticSelected",  { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineWarningDiagnosticVisible",   { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineInfo",                       { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineInfoSelected",               { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true })
+  hl(0, "BufferLineInfoVisible",                { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineInfoDiagnostic",             { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineInfoDiagnosticSelected",     { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineInfoDiagnosticVisible",      { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineHint",                       { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineHintSelected",               { fg = p.tab_fg, bg = p.tab_sel, bold = true, nocombine = true })
+  hl(0, "BufferLineHintVisible",                { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineHintDiagnostic",             { fg = p.tab_fg, bg = p.tab_bg })
+  hl(0, "BufferLineHintDiagnosticSelected",     { fg = p.tab_fg, bg = p.tab_sel })
+  hl(0, "BufferLineHintDiagnosticVisible",      { fg = p.tab_fg, bg = p.tab_bg })
   hl(0, "BufferLineTruncMarker",               { fg = p.tab_fg, bg = p.tab_bg })
   hl(0, "BufferLineOffsetSeparator",           { fg = p.tab_bg, bg = p.tab_bg })
 
@@ -1054,5 +1105,14 @@ vim.api.nvim_create_autocmd("BufEnter", {
 -- Clean up all fs_event handles on exit to avoid libuv handle leak warnings.
 vim.api.nvim_create_autocmd("VimLeave", {
   callback = function() sync.stop_watchers() end,
+})
+
+-- Re-apply palette after any event that can reset highlight groups:
+--   ColorScheme  — colorscheme load/reload wipes all hl groups
+--   LspAttach    — some LSP servers set highlight groups on attach
+-- This makes the bufferline theme bleed-immune regardless of trigger (BUG-021).
+vim.api.nvim_create_autocmd({ "ColorScheme", "LspAttach" }, {
+  desc = "BUG-021: re-apply palette after hl-group-resetting events",
+  callback = function() apply_palette() end,
 })
 

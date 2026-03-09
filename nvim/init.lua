@@ -1061,21 +1061,36 @@ require("lazy").setup({
       "hrsh7th/cmp-nvim-lsp",
       "hrsh7th/cmp-buffer",
       "hrsh7th/cmp-path",
+      "hrsh7th/cmp-nvim-lsp-signature-help", -- function parameter hints in the popup
+      "garymjr/nvim-snippets",               -- vim.snippet adapter (nvim 0.10+ built-in)
     },
     config = function()
       local cmp = require("cmp")
       cmp.setup({
+        -- Show the popup automatically as you type; pre-select the first item so
+        -- <CR> confirms immediately without a separate <Tab> to select.
+        completion = { completeopt = "menu,menuone,noinsert" },
+        snippet = {
+          expand = function(args)
+            vim.snippet.expand(args.body) -- nvim 0.10+ built-in snippet engine
+          end,
+        },
         mapping = cmp.mapping.preset.insert({
           ["<C-Space>"] = cmp.mapping.complete(), -- trigger completion manually
-          ["<CR>"] = cmp.mapping.confirm({ select = true }),
-          ["<Tab>"] = cmp.mapping.select_next_item(),
-          ["<S-Tab>"] = cmp.mapping.select_prev_item(),
-          ["<C-e>"] = cmp.mapping.abort(),
+          ["<CR>"]      = cmp.mapping.confirm({ select = true }),
+          ["<Tab>"]     = cmp.mapping.select_next_item(),
+          ["<S-Tab>"]   = cmp.mapping.select_prev_item(),
+          ["<C-e>"]     = cmp.mapping.abort(),
+          -- Scroll docs in the detail window without leaving insert mode
+          ["<C-d>"]     = cmp.mapping.scroll_docs(4),
+          ["<C-u>"]     = cmp.mapping.scroll_docs(-4),
         }),
         sources = cmp.config.sources({
-          { name = "nvim_lsp" }, -- LSP suggestions
-          { name = "buffer" }, -- words from current buffer
-          { name = "path" }, -- filesystem paths
+          { name = "nvim_lsp" },                  -- LSP completions
+          { name = "nvim_lsp_signature_help" },   -- function signature hints
+          { name = "snippets" },                  -- vim.snippet snippets
+          { name = "buffer" },                    -- words from current buffer
+          { name = "path" },                      -- filesystem paths
         }),
       })
     end,

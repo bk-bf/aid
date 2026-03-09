@@ -34,7 +34,7 @@ set -g status-left-length 90
 set -g status-right-length 90
 
 set -g status-left  "#[fg=${cursor_fg},bg=${purple},bold] #S #[fg=${purple},bg=${blue},none]  "
-set -g status-right "#[fg=${lavender},bg=${blue}]#[fg=${fg},bg=${lavender}] %H:%M #[fg=${purple},bg=${lavender}]#[fg=${cursor_fg},bg=${purple},bold] #{?client_prefix,PREFIX,#h} "
+set -g status-right "#[fg=${lavender},bg=${blue}] #{pane_current_command} #[fg=${lavender},bg=${blue}]#[fg=${fg},bg=${lavender}] %H:%M #[fg=${purple},bg=${lavender}]#[fg=${cursor_fg},bg=${purple},bold] #{?client_prefix,PREFIX,#h} "
 
 set -g window-status-style          ""
 set -g window-status-format         ""

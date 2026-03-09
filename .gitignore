@@ -4,6 +4,7 @@
 # stylua.toml  — StyLua formatter config
 # .luarc.json  — LuaLS workspace config (suppresses false-positive vim globals)
 .nvim.lua
+!nvim/templates/.nvim.lua
 selene.toml
 stylua.toml
 .luarc.json

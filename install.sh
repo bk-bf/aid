@@ -24,6 +24,12 @@ if command -v pacman &>/dev/null && ! python3 -c "import pynvim" &>/dev/null; th
   sudo pacman -S --needed --noconfirm python-pynvim
 fi
 
+# Arch/CachyOS: delta is required by lazygit for diff highlighting
+if command -v pacman &>/dev/null && ! command -v delta &>/dev/null; then
+  echo "==> Installing delta..."
+  sudo pacman -S --needed --noconfirm git-delta
+fi
+
 # ── 2. TPM ───────────────────────────────────────────────────────────────────
 if [[ ! -d "$TPM_DIR" ]]; then
   echo "==> Installing TPM..."

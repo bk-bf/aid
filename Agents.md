@@ -48,6 +48,29 @@ aid/                            ← bare git repo root
     └── BUGS.md
 ```
 
+## btca — documentation assistant
+
+btca is a self-hosted AI tool that answers questions about specific codebases or documentation sets. Use it when you need accurate, up-to-date information about any of the indexed resources below — do not rely on training-data knowledge for these, as it may be stale or wrong.
+
+**When to use it:** any question about tmux options/commands, Neovim Lua API, lazy.nvim plugin spec, opencode internals/config, nvim-tree API, or lualine config.
+
+**How to invoke:**
+- Slash command: `/btca <resource> <question>` (e.g. `/btca neovim vim.keymap.set signature`)
+- MCP tool: call `ask` with `resource` and `question` parameters (the `listResources` tool returns the current list)
+
+**Indexed resources:**
+
+| Name | Source | Notes |
+|---|---|---|
+| `tmux` | github.com/tmux/tmux (master) | Full source tree — check `CHANGES`, man pages, and `.c` source |
+| `neovim` | github.com/neovim/neovim (master, `runtime/doc`) | Vimdoc files for the full Neovim Lua API |
+| `lazy-nvim` | github.com/folke/lazy.nvim (main) | README + source — plugin spec, config, lazy-loading |
+| `opencode` | github.com/sst/opencode (dev) | Full source — internals, config schema, MCP, slash commands |
+| `nvim-tree` | github.com/nvim-tree/nvim-tree.lua (master) | README + doc/ — API, config options, events |
+| `lualine` | github.com/nvim-lualine/lualine.nvim (master) | README + doc/ — sections, components, themes |
+
+**Always dispatch btca queries as a subagent** — never block the main thread waiting for a response. Spawn a subagent, let it run the query and return the answer, then continue.
+
 ## Documentation
 
 All architecture detail lives in the `docs/` worktree (`dev-docs` branch). Start here:

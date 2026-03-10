@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # gen-tmux-palette.sh — writes $AID_DATA/tmux/palette.conf from the aid palette.
 # See docs/ARCHITECTURE.md for details.
+# shellcheck disable=SC2154  # palette vars (blue, fg, purple, etc.) are injected via eval of lua output below
 
 set -euo pipefail
 

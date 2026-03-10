@@ -18,6 +18,8 @@ fi
 
 CURRENT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
+# shellcheck source=./awk_helper.sh
+# shellcheck disable=SC1091  # file exists at runtime; shellcheck can't follow without -x
 source "$CURRENT_DIR"/awk_helper.sh
 
 MAIN_PANE_ID="$1"
@@ -38,10 +40,8 @@ tmux -V					# log tmux version
 
 main_pane_exists=1
 side_pane_exists=1
-tmux list-panes -t "$MAIN_PANE_ID" &> /dev/null
-[ "$?" -ne 0 ] && main_pane_exists=0
-tmux list-panes -t "$SIDE_PANE_ID" &> /dev/null
-[ "$?" -ne 0 ] && side_pane_exists=0
+if ! tmux list-panes -t "$MAIN_PANE_ID" &> /dev/null; then main_pane_exists=0; fi
+if ! tmux list-panes -t "$SIDE_PANE_ID" &> /dev/null; then side_pane_exists=0; fi
 
 # `tmux display` doesn't match strictly and it will give you any pane if not found.
 main_pane_pid=$(tmux display -pt "$MAIN_PANE_ID" '#{pane_pid}')
@@ -52,10 +52,10 @@ then
 fi
 
 echo "Watching main pane (pid = $main_pane_pid)"
+# shellcheck disable=SC2016  # awk syntax, not shell
 main_pane_prevcwd=$(lsof -a -d cwd -p "$main_pane_pid" 2> /dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2)
 # This does not work on MacOS.
 #main_pane_prevcwd=$(readlink -f "/proc/$main_pane_pid/cwd")
-side_pane_root="$main_pane_prevcwd"
 
 # `tmux display` doesn't match strictly and it will give you any pane if not found.
 side_pane_pid=$(tmux display -pt "$SIDE_PANE_ID" '#{pane_pid}')
@@ -95,7 +95,6 @@ fi
 tree_root_dir=$("$PYTHON_COMMAND" "$CURRENT_DIR/go_random_within_rootdir.py" "$NVIM_ADDR" "$main_pane_prevcwd" "$SIDE_PANE_ROOT")
 echo "$tree_filetype detected!"
 echo "Detected side pane root: $tree_root_dir"
-side_pane_root="$tree_root_dir"
 
 while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 	# optional: check if sidebar is running `nvim .`
@@ -114,6 +113,7 @@ while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 	# 	fi
 	# fi
 
+	# shellcheck disable=SC2016  # awk syntax, not shell
 	main_pane_cwd=$(lsof -a -d cwd -p "$main_pane_pid" 2> /dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2)
 	# This does not work on MacOS.
 	#main_pane_cwd=$(readlink -f "/proc/$main_pane_pid/cwd")
@@ -133,7 +133,6 @@ while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 		if ! "$PYTHON_COMMAND" "$CURRENT_DIR/change_root.py" "$NVIM_ADDR" "$main_pane_cwd"; then
 			echo "Error on change_root.py"
 		fi
-		side_pane_root="$main_pane_cwd"
 		main_pane_prevcwd="$main_pane_cwd"
 	fi
 
@@ -151,8 +150,6 @@ while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 		sleep "$REFRESH_INTERVAL_INACTIVE_WINDOW"
 	fi
 
-	tmux list-panes -t "$MAIN_PANE_ID" &> /dev/null
-	[ "$?" -ne 0 ] && main_pane_exists=0
-	tmux list-panes -t "$SIDE_PANE_ID" &> /dev/null
-	[ "$?" -ne 0 ] && side_pane_exists=0
+	if ! tmux list-panes -t "$MAIN_PANE_ID" &> /dev/null; then main_pane_exists=0; fi
+	if ! tmux list-panes -t "$SIDE_PANE_ID" &> /dev/null; then side_pane_exists=0; fi
 done

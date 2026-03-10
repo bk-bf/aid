@@ -5,7 +5,10 @@
 # Symlinked to:
 #   ~/.config/tmux/plugins/treemux/scripts/tree/watch_and_update.sh
 # After a TPM update of treemux, re-run install.sh or manually re-run the symlink commands.
-# Change from upstream: always change-root to cwd on any cd (removed child/parent/jump logic)
+# Changes from upstream:
+#   - Always change-root to cwd on any cd (removed child/parent/jump logic)
+#   - cwd detection uses /proc/<pid>/cwd on Linux (no external tool required);
+#     falls back to lsof on macOS where /proc/ is unavailable.
 
 if [[ $# -ne 9 ]]; then
 	echo "Usage: $0 <MAIN_PANE_ID> <SIDE_PANE_ID> <SIDE_PANE_ROOT> <NVIM_ADDR> <REFRESH_INTERVAL> <REFRESH_INTERVAL_INACTIVE_PANE> <REFRESH_INTERVAL_INACTIVE_WINDOW> <NVIM_COMMAND> <PYTHON_COMMAND>"
@@ -51,10 +54,20 @@ then
 	exit 101
 fi
 
+# _pane_cwd <pid>  — resolve the current working directory of a process.
+# On Linux: read /proc/<pid>/cwd directly (no external tool, works on Alpine too).
+# On macOS: fall back to lsof (BSD readlink has no -f /proc support).
+_pane_cwd() {
+	local pid="$1"
+	if [[ "$OSTYPE" == linux* ]]; then
+		readlink "/proc/$pid/cwd" 2>/dev/null
+	else
+		lsof -a -d cwd -p "$pid" 2>/dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2
+	fi
+}
+
 echo "Watching main pane (pid = $main_pane_pid)"
-main_pane_prevcwd=$(lsof -a -d cwd -p "$main_pane_pid" 2> /dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2)
-# This does not work on MacOS.
-#main_pane_prevcwd=$(readlink -f "/proc/$main_pane_pid/cwd")
+main_pane_prevcwd=$(_pane_cwd "$main_pane_pid")
 side_pane_root="$main_pane_prevcwd"
 
 # `tmux display` doesn't match strictly and it will give you any pane if not found.
@@ -114,9 +127,7 @@ while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 	# 	fi
 	# fi
 
-	main_pane_cwd=$(lsof -a -d cwd -p "$main_pane_pid" 2> /dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2)
-	# This does not work on MacOS.
-	#main_pane_cwd=$(readlink -f "/proc/$main_pane_pid/cwd")
+	main_pane_cwd=$(_pane_cwd "$main_pane_pid")
 	echo $main_pane_cwd
 
 	if [[ -z "$main_pane_cwd" ]]

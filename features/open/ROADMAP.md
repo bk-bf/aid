@@ -5,17 +5,11 @@
 
 - [>] **T-003**: Test on non-Arch machines and environments (Ubuntu, macOS, SSH, tmux version variance)
 - [>] **T-022**: **Cross-distro install support** — expand `install.sh` beyond Arch/CachyOS so aid works out-of-the-box on mainstream Linux distros (Ubuntu/Debian, Fedora/RHEL, Alpine, Arch) and macOS. Currently the only managed dependency is `python-pynvim` via `pacman`; every other prerequisite is assumed present, which is false on stock Ubuntu/Fedora images.
-- [x] **T-012**: Consider `main` + feature-branches workflow (currently single `master`)
 
 ## Phase 2 — Differentiate (architectural upgrades)
 
-- [x] **T-008**: Add `aid --update` alias — `boot.sh` (git pull + re-run `install.sh`) was already the full implementation; `--update` added as an explicit alias for `-i/--install` in `aid.sh` for discoverability
-- [x] **T-017**: Replace `lazygit.nvim` env-var integration with a raw terminal float — build the lazygit command directly (`lazygit -w <work_tree> -g <git_dir>`), never touch `GIT_DIR`/`GIT_WORK_TREE` env vars; eliminates BUG-006 class of env leaks permanently (see [bugs/BUG-006.md](bugs/BUG-006.md))
-
 ## Phase 3 — Publicize
 
-- [x] **T-009**: Opencode pane opt-in via flag (`aid --no-ai` skips opencode pane) — removes "requires opencode" adoption barrier
-- [x] **T-013**: `aid --branch <name>` — clone the named remote branch into an isolated install (`~/.local/share/aid/<name>`, `~/.config/aid/<name>`), bootstrap on first use, then re-exec into that branch's `aid.sh`. `--branch` with no argument shows an interactive remote branch picker. `--branch main` is a no-op. (Earlier `-w/--worktree` approach assumed a bare-repo worktree layout that only existed on the dev machine and was replaced by `--branch` which works from any install via the git remote.)
 - [ ] **T-010**: Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
 
 ## Phase 4 — Fleet (multi-agent parallel development)
@@ -37,10 +31,8 @@ Fleet is the tmux-native multi-agent orchestration layer for `aid`. It targets u
 
 ## Deferred / under consideration
 
-- [x] **T-011**: Dev branch for bleeding-edge work — fulfilled by `aid --branch <name>`: any remote branch can be cloned into an isolated install and run independently without touching the main install
 - [ ] **T-018**: Allow `~/.config/opencode/` passthrough — currently `OPENCODE_CONFIG_DIR` is always set to `$AID_DIR/opencode`, which means users cannot carry their existing opencode config (custom models, API keys stored in opencode's config, etc.) into an aid session. A flag or env var to opt out of the override would remove this friction for users who already have an opencode setup they're happy with. Deferred until the scope of config merging is clearer.
 - [ ] **T-019**: User nvim/tmux override layer — a structured insertion point (e.g. `~/.config/aid/nvim/lua/user.lua` required last in `init.lua`) that lets users extend aid's config without forking the repo. Currently deferred because the scope of safely composing arbitrary user configs with aid's own plugin load order, keybinds, and autocmds is undefined. See ADR-012.
 - [ ] **T-024 / BUG-015**: Intermittent `E5560: writefile must not be called in a fast event context` after lazygit commit; needs stack trace on next occurrence to identify call site (see [bugs/watching/BUG-015.md](bugs/watching/BUG-015.md))
 - [ ] **T-025**: **Component-driven palette** — refactor `nvim/lua/palette.lua` from color-name keys (`purple`, `blue`, `lavender`) to role/component keys (`cursor_bg`, `mode_bg`, `statusline_base`, `statusline_mid`, etc.) so a reader of `palette.lua` immediately knows *what* each value affects without cross-referencing `init.lua`. The current color-name variables are consumed in multiple unrelated roles (e.g. `blue` drives both the nvim statusline devinfo segment and the tmux status bar base); splitting them into per-component keys removes that implicit coupling and makes palette customisation safe without needing to trace all call sites.
 - [ ] **T-026**: **`--branch` install path layout** — currently `aid --branch feature/T-009` clones into `~/.local/share/aid/feature/T-009` (slash preserved from remote branch name), creating an unintended subdirectory hierarchy. Should be deliberate: either flatten slashes (`feature/T-009` → `feature-T-009`) or use a dedicated namespace (`~/.local/share/aid/branch/T-009`). Chosen layout should be consistent with `AID_CONFIG` path and documented.
-

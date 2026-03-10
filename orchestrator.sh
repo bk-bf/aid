@@ -228,9 +228,9 @@ _prompt_new_session() {
 
 _ensure_server
 
-# Count existing aid/* sessions (exclude aid/dashboard).
+# Count existing aid/<project>/<slug> sessions (exclude aid/dashboard).
 _existing=$(tmux -L aid list-sessions -F "#{session_name}" 2>/dev/null \
-  | grep -cE '^aid/[^/]+/[^/]+$' || echo "0")
+  | grep -cE '^aid/[^/]+/[^/]+$' || true)
 
 if [[ "$_existing" -eq 0 ]]; then
   # First run — prompt for a session and spawn it.

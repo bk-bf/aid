@@ -17,25 +17,21 @@
 - [ ] **T-010**: Terminal theme sync hook — optional integration point for syncing aid's palette with the host terminal emulator theme
 - [ ] **T-030**: **Desktop notifications from opencode** — fire a `notify-send` (Linux) / `osascript` (macOS) notification when opencode finishes a task or requires user input. Opencode has no native hook for this; implementation options: (a) a wrapper script that tails the opencode pane output for idle/prompt patterns and fires on match, (b) a tmux `pane-focus-out` + output monitoring approach, or (c) an opencode custom command that sends the notification as its last step. The "requires input" case is harder — needs reliable detection of opencode's input-waiting state (e.g. prompt cursor visible, no tool calls in flight).
 
-## Phase 4 — Fleet (multi-agent parallel development)
+## Phase 4 — Orchestrator (T3/Codex-style parallel workflow)
 
-Fleet is the tmux-native multi-agent orchestration layer for `aid`. It targets users already comfortable in the aid environment — not the VS Code migrant in their first session. The seam it smooths: the friction between tmux window management, git worktree provisioning, and running multiple opencode instances in parallel on decomposed sub-tasks of a single codebase goal.
+Orchestrator mode is the tmux-native solo orchestration layout for `aid` that replicates the T3/Codex parallel workflow in the terminal. A human operator runs multiple live opencode sessions simultaneously — one per task or project context — and switches between them with full spatial continuity. All sessions stay alive in the background; the operator moves focus, not the agents.
 
-`aid` stays pure infrastructure glue; all LLM reasoning (decomposition, merge) delegates to opencode.
+Three-pane layout: session navigator (left, `~25%`) + active opencode (center, `~50%`) + lazygit diff review (right, `~25%`) + nvim tab (`prefix+n`). Each opencode session maps 1:1 to a tmux session named `aid/<project>/<session>`. The session navigator surfaces as a global `prefix+s` popup overlay, grouping sessions by project in a folder-like tree.
 
-- [ ] **T-FLEET-1**: `aid --fleet` core — parse `tasks.md`, provision git worktrees at `.aid/worktrees/worker-N`, spawn N tmux windows each running `opencode` with task prompt pre-loaded
-- [ ] **T-FLEET-2**: Half/half tmux layout — top pane: active opencode instance; bottom pane: state-driven supervisor showing per-worker status (running/done/failed), live diff of active worker, last tool call
-- [ ] **T-FLEET-3**: `window-active` tmux hook — sync bottom supervisor pane to the currently focused worker window
-- [ ] **T-FLEET-4**: `/fleet-plan` opencode command — analyzes codebase + user prompt, writes `tasks.md` with `## worker-N: <name>` headings, body prompts, and `Designated files:` scope constraints
-- [ ] **T-FLEET-5**: `/fleet-merge` opencode command — reads all worktree diffs, merges into main branch under supervised AI review
-- [ ] **T-FLEET-6**: `aid --fleet-clean` — removes `.aid/worktrees/` after merge completes (optional teardown)
-- [ ] **T-FLEET-7**: Batch dependency model in `tasks.md` — support batch markers so dependent worker groups spawn only after the prior batch merges
-- [ ] **T-FLEET-8**: `:editor` window — nvim + file tree sidebar rooted to the active worker's worktree path, for direct intervention without breaking layout
-
-**Philosophy note:** Fleet passes the seam rule — it eliminates manual worktree setup, tmux layout wiring, and cross-instance coordination overhead. It does not belong in Phases 1–3 because those target the VS Code migrant's first session; fleet targets users already past that barrier.
+- [ ] **T-ORC-1**: `aid --mode orchestrator` bootstrap — create `aid/dashboard` tmux session, spawn initial 3-pane layout (opencode center, lazygit right, nvim tab), register global `prefix+s` popup binding
+- [ ] **T-ORC-2**: Session navigator (`aid-sessions`) — shell script + fzf that reads all `aid/*/*` tmux sessions, groups by project slug, renders tree with status indicators (running/idle + last activity), calls `tmux switch-client` on selection
+- [ ] **T-ORC-3**: New session flow — `n` in navigator prompts for project + session name (defaults: repo basename + branch), creates `aid/<project>/<session>` tmux session with full 3-pane layout
+- [ ] **T-ORC-4**: Session metadata persistence — maintain `~/.local/share/aid/sessions.json` with repo path, branch, created/last-active timestamps; enables navigator to show branch names and enables session resurrection after tmux server restart
+- [ ] **T-ORC-5**: Navigator TUI upgrade — replace fzf stage with dedicated curses/Go TUI supporting collapse/expand project groups, `d` delete, `r` rename, live status polling
 
 ## Deferred / under consideration
 
+- [ ] **T-FLEET**: `aid --fleet` multi-agent orchestration — parse `tasks.md`, provision git worktrees per worker, spawn N tmux windows each running `opencode` with task prompt, half/half supervisor layout (active agent top, status/diff bottom), `/fleet-plan` decomposition command, `/fleet-merge` supervised AI merge, batch dependency model. See `AID-FLEET-FEATURE-REPORT.md` for full spec.
 - [ ] **T-018**: Allow `~/.config/opencode/` passthrough — currently `OPENCODE_CONFIG_DIR` is always set to `$AID_DIR/opencode`, which means users cannot carry their existing opencode config (custom models, API keys stored in opencode's config, etc.) into an aid session. A flag or env var to opt out of the override would remove this friction for users who already have an opencode setup they're happy with. Deferred until the scope of config merging is clearer.
 - [ ] **T-019**: User nvim/tmux override layer — a structured insertion point (e.g. `~/.config/aid/nvim/lua/user.lua` required last in `init.lua`) that lets users extend aid's config without forking the repo. Currently deferred because the scope of safely composing arbitrary user configs with aid's own plugin load order, keybinds, and autocmds is undefined. See ADR-012.
 - [ ] **T-024 / BUG-015**: Intermittent `E5560: writefile must not be called in a fast event context` after lazygit commit; needs stack trace on next occurrence to identify call site (see [bugs/watching/BUG-015.md](bugs/watching/BUG-015.md))

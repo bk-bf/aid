@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# aid-sessions — orchestrator session navigator (Stage 1: fzf-based).
+# aid-sessions — orchestrator session navigator (T-ORC-5: enhanced fzf TUI).
 #
-# Lists all aid@<project>/<slug> tmux sessions grouped by project.
-# Also shows dead sessions from sessions.json (not in tmux) for resurrection.
+# Displays all aid@<project>/<slug> tmux sessions in a rich fzf interface:
+#   - Project group headers with collapse/expand  (z)
+#   - Branch names and activity status from metadata
+#   - Preview pane: repo path, branch, git status, timestamps
+#   - Dead session resurrection                   (Enter on dead session)
+#   - Rename session                              (r)
+#   - Delete session with cleanup                 (d)
+#   - New session                                 (n)
+#   - Manual refresh                              (ctrl-r)
+#
 # Invoked by:
 #   - orchestrator.sh when sessions already exist
 #   - tmux.conf prefix+s binding: tmux display-popup -E "$AID_DIR/aid-sessions"
 #
-# Keybinds (inside fzf):
-#   Enter       switch to selected session (or resurrect dead session)
-#   ctrl-n      create new session
-#   ctrl-d      delete selected session (kill tmux session + remove metadata)
-#   ctrl-r      refresh list
-#   esc/ctrl-c  close navigator
+# Requirements: fzf >= 0.57
 #
-# Requirements: fzf
+# TODO(T-ORC-5b): replace with a Go/Bubble Tea TUI for richer UX (proper
+#   cursor navigation, collapse animation, mouse support, inline rename).
 
 set -euo pipefail
 
@@ -23,6 +27,13 @@ set -euo pipefail
 
 # shellcheck source=aid-meta
 source "$AID_DIR/aid-meta"
+
+# ── Collapse state ────────────────────────────────────────────────────────────
+# Tmpfile listing collapsed project names, one per line.
+# Exported so aid-sessions-list and aid-sessions-action can read it.
+export AID_SESSIONS_COLLAPSE
+AID_SESSIONS_COLLAPSE=$(mktemp /tmp/aid-sessions-collapse.XXXXXX)
+trap 'rm -f "$AID_SESSIONS_COLLAPSE"' EXIT
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,92 +46,6 @@ _switch() {
   fi
 }
 
-# ── Session list builder ──────────────────────────────────────────────────────
-
-_build_list() {
-  # Live tmux sessions: aid@<project>/<slug>
-  mapfile -t _live < <(
-    tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \
-      | grep -E ' aid@[^/]+/[^/]+$' \
-      | sort -rn \
-      | awk '{print $2}'
-  )
-
-  # Dead sessions: in sessions.json but not in tmux.
-  mapfile -t _dead < <(
-    _meta_all_sessions | while IFS= read -r s; do
-      printf '%s\n' "${_live[@]:-}" | grep -qxF "$s" || printf '%s\n' "$s"
-    done || true
-  )
-
-  if [[ ${#_live[@]} -eq 0 ]] && [[ ${#_dead[@]} -eq 0 ]]; then
-    return
-  fi
-
-  local _current_project=""
-
-  # ── Live sessions ──
-  for _session in "${_live[@]}"; do
-    local _project _slug _activity _now _diff _status _active_marker _branch
-    # Session format: aid@<project>/<slug>
-    _project=$(printf '%s' "$_session" | cut -d'@' -f2 | cut -d'/' -f1)
-    _slug=$(printf '%s' "$_session"    | cut -d'/' -f2)
-
-    # Project group header.
-    if [[ "$_project" != "$_current_project" ]]; then
-      _current_project="$_project"
-      printf 'HEADER: %s/\n' "$_project"
-    fi
-
-    # Activity status from pane_last_used timestamp.
-    _activity=$(tmux -L aid list-panes -t "$_session" \
-      -F "#{pane_last_used}" 2>/dev/null | head -1 || printf '0')
-    _now=$(date +%s)
-    _diff=$(( _now - _activity ))
-    if   (( _diff < 60   )); then _status="running  ${_diff}s ago"
-    elif (( _diff < 3600 )); then _status="idle     $(( _diff / 60 ))m ago"
-    else                          _status="idle     $(( _diff / 3600 ))h ago"
-    fi
-
-    # Branch from metadata (graceful empty if jq absent or entry missing).
-    _branch=$(_meta_get "$_session" "branch")
-    [[ -n "$_branch" ]] && _branch=" [$_branch]" || _branch=""
-
-    # Mark the currently attached session.
-    _active_marker="  "
-    if tmux -L aid display-message -p "#{session_name}" 2>/dev/null | grep -qxF "$_session"; then
-      _active_marker="> "
-    fi
-
-    # Format: indent + marker + slug + branch + status + hidden session tag.
-    printf '    %s%-24s%s %s\t[%s]\n' \
-      "$_active_marker" "$_slug" "$_branch" "$_status" "$_session"
-  done
-
-  # ── Dead sessions (from metadata, not in tmux) ──
-  for _session in "${_dead[@]}"; do
-    local _project _slug _branch _last_active
-    # Session format: aid@<project>/<slug>
-    _project=$(printf '%s' "$_session" | cut -d'@' -f2 | cut -d'/' -f1)
-    _slug=$(printf '%s' "$_session"    | cut -d'/' -f2)
-
-    # Project group header.
-    if [[ "$_project" != "$_current_project" ]]; then
-      _current_project="$_project"
-      printf 'HEADER: %s/\n' "$_project"
-    fi
-
-    _branch=$(_meta_get "$_session" "branch")
-    [[ -n "$_branch" ]] && _branch=" [$_branch]" || _branch=""
-    _last_active=$(_meta_get "$_session" "last_active")
-    [[ -z "$_last_active" ]] && _last_active="unknown"
-
-    # dead sessions are prefixed with "~" marker and tagged __dead__ for handling.
-    printf '    ~ %-23s%s dead (last: %s)\t[__dead__%s]\n' \
-      "$_slug" "$_branch" "$_last_active" "$_session"
-  done
-}
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if ! command -v fzf &>/dev/null; then
@@ -130,56 +55,69 @@ if ! command -v fzf &>/dev/null; then
   exit 1
 fi
 
-_list=$(_build_list)
+# Pre-build the action and reload command strings (expanded once, safe paths).
+_act="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") $(printf '%q' "$AID_DIR/aid-sessions-action")"
+_lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") $(printf '%q' "$AID_DIR/aid-sessions-list")"
 
-if [[ -z "$_list" ]]; then
+_initial_list=$("$AID_DIR/aid-sessions-list" 2>/dev/null || true)
+
+if [[ -z "$_initial_list" ]]; then
   echo "no orchestrator sessions — run: aid --mode orchestrator"
   exit 0
 fi
 
-_selected=$(printf '%s\n' "$_list" | fzf \
-  --prompt="  session › " \
-  --header="  enter:switch  ctrl-n:new  ctrl-d:delete  esc:close" \
+_selected=$(printf '%s\n' "$_initial_list" | fzf \
+  --prompt="  " \
+  --border=rounded \
+  --border-label=" aid sessions " \
+  --border-label-pos=3 \
+  --header=$'  \033[2menter\033[0m switch  \033[2mn\033[0m new  \033[2mr\033[0m rename  \033[2md\033[0m delete  \033[2mz\033[0m collapse  \033[2mctrl-r\033[0m refresh  \033[2mq/esc\033[0m quit' \
   --no-sort \
   --ansi \
-  --nth=1,2 \
   --delimiter='\t' \
   --with-nth=1 \
-  --bind "ctrl-n:execute(printf '__new__')+abort" \
-  --bind "ctrl-d:execute(printf '__del__%s' {+})+abort" \
-  --color "header:italic:dim,prompt:blue,pointer:blue" \
-  | grep -oE '\[(aid@[^]]+|__dead__aid@[^]]+|__new__|__del__[^\t]*)\]' \
-  | tr -d '[]' || true)
+  --accept-nth='2' \
+  --preview="$_act preview {}" \
+  --preview-window='right:42%:wrap:border-left' \
+  --preview-label=' info ' \
+  --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
+  --bind "ctrl-r:reload($_lst 2>/dev/null)" \
+  --bind "z:execute-silent($_act toggle-collapse {})+reload($_lst 2>/dev/null)" \
+  --bind "r:execute($_act rename {})+reload($_lst 2>/dev/null)" \
+  --bind "d:execute($_act delete {})+reload($_lst 2>/dev/null)" \
+  --bind "n:become(AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/orchestrator.sh") --new)" \
+  --bind "q:abort" \
+  --bind "esc:abort" \
+  2>/dev/null \
+  || true)
+
+# _selected is field 2 (--accept-nth=2); strip any residual brackets.
+_selected=$(printf '%s' "${_selected:-}" | tr -d '[]')
 
 case "${_selected:-}" in
   "")
     exit 0
     ;;
-  __new__)
-    exec "$AID_DIR/orchestrator.sh" --new
-    ;;
-  __del__*)
-    # Extract the real session name from the tag (strip __del__ prefix).
-    _target=$(printf '%s' "$_selected" | sed 's/^__del__//')
-    # Strip __dead__ prefix if present (dead sessions also go through ctrl-d).
-    _target=$(printf '%s' "$_target" | sed 's/^__dead__//')
-    if [[ -n "$_target" ]]; then
-      tmux -L aid kill-session -t "$_target" 2>/dev/null || true
-      _meta_remove "$_target"
+  __header__*)
+    # Enter on a header → toggle collapse, reopen navigator.
+    _project="${_selected#__header__}"
+    if grep -qxF "$_project" "$AID_SESSIONS_COLLAPSE" 2>/dev/null; then
+      grep -vxF "$_project" "$AID_SESSIONS_COLLAPSE" > "${AID_SESSIONS_COLLAPSE}.tmp" \
+        && mv "${AID_SESSIONS_COLLAPSE}.tmp" "$AID_SESSIONS_COLLAPSE" || true
+    else
+      printf '%s\n' "$_project" >> "$AID_SESSIONS_COLLAPSE"
     fi
-    # Reopen navigator after delete.
     exec "$AID_DIR/aid-sessions"
     ;;
-  __dead__aid@*)
-    # Resurrect: extract real session name and re-run orchestrator with saved repo.
-    _real_session=$(printf '%s' "$_selected" | sed 's/^__dead__//')
+  __dead__*)
+    _real_session="${_selected#__dead__}"
     _repo=$(_meta_get "$_real_session" "repo_path")
     _project=$(printf '%s' "$_real_session" | cut -d'@' -f2 | cut -d'/' -f1)
     _slug=$(printf '%s' "$_real_session"    | cut -d'/' -f2)
     if [[ -d "${_repo:-}" ]]; then
       exec "$AID_DIR/orchestrator.sh" --resurrect "$_project" "$_slug" "$_repo"
     else
-      echo "aid-sessions: repo path '$_repo' no longer exists for session $_real_session" >&2
+      echo "aid-sessions: repo path '${_repo}' no longer exists for session $_real_session" >&2
       exit 1
     fi
     ;;

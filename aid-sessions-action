@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# aid-sessions-action — action dispatcher for aid-sessions fzf bindings.
+#
+# Usage: aid-sessions-action <action> <fzf-line>
+#
+# Actions: preview | rename | delete | toggle-collapse
+#
+# fzf-line is the full tab-delimited line from fzf: "DISPLAY\t[TAG]"
+#
+# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE (tmpfile for collapse state)
+
+set -euo pipefail
+
+: "${AID_DATA:?}"
+: "${AID_DIR:?}"
+
+# shellcheck source=aid-meta
+source "$AID_DIR/aid-meta"
+
+_action="$1"
+_line="${2:-}"
+
+# Extract the session tag from field 2 (the [bracket] part).
+_raw_tag=$(printf '%s' "$_line" | cut -f2 | tr -d '[]')
+
+# ── preview ────────────────────────────────────────────────────────────────────
+_do_preview() {
+  case "$_raw_tag" in
+    __header__*)
+      local project="${_raw_tag#__header__}"
+      printf '\033[1;34m%s/\033[0m\n' "$project"
+      printf '\nProject group.\nPress \033[1mz\033[0m to collapse/expand.\n'
+      return
+      ;;
+    __dead__*) local session="${_raw_tag#__dead__}" ;;
+    *)         local session="$_raw_tag" ;;
+  esac
+
+  local repo branch created last_active
+  repo=$(_meta_get "$session" "repo_path")
+  branch=$(_meta_get "$session" "branch")
+  created=$(_meta_get "$session" "created_at")
+  last_active=$(_meta_get "$session" "last_active")
+
+  printf '\033[1;36m%s\033[0m\n' "$session"
+
+  if tmux -L aid has-session -t "$session" 2>/dev/null; then
+    local _nw _np
+    _nw=$(tmux -L aid list-windows -t "$session" 2>/dev/null | wc -l | tr -d ' ')
+    _np=$(tmux -L aid list-panes   -t "$session" 2>/dev/null | wc -l | tr -d ' ')
+    printf '\033[1;32m● live\033[0m  %s windows  %s panes\n' "$_nw" "$_np"
+  else
+    printf '\033[1;31m✗ dead\033[0m  (press Enter to resurrect)\n'
+  fi
+
+  printf '\n'
+  [[ -n "$repo"        ]] && printf '\033[2mrepo       \033[0m %s\n' "$repo"
+  [[ -n "$branch"      ]] && printf '\033[2mbranch     \033[0m %s\n' "$branch"
+  [[ -n "$created"     ]] && printf '\033[2mcreated    \033[0m %s\n' "$created"
+  [[ -n "$last_active" ]] && printf '\033[2mlast active\033[0m %s\n' "$last_active"
+
+  if [[ -n "$repo" && -d "$repo" ]]; then
+    printf '\n'
+    local ahead behind
+    ahead=$(git  -C "$repo" rev-list --count "@{upstream}..HEAD" 2>/dev/null || true)
+    behind=$(git -C "$repo" rev-list --count "HEAD..@{upstream}" 2>/dev/null || true)
+    if [[ -n "$ahead" && -n "$behind" ]]; then
+      printf '\033[2mgit status\033[0m ↑%s ahead  ↓%s behind\n' "$ahead" "$behind"
+    fi
+    local wt_status
+    wt_status=$(git -C "$repo" status --short 2>/dev/null | head -8 || true)
+    [[ -n "$wt_status" ]] && printf '\n%s\n' "$wt_status"
+  fi
+}
+
+# ── rename ─────────────────────────────────────────────────────────────────────
+_do_rename() {
+  case "$_raw_tag" in __dead__*|__header__*) return ;; esac
+  local session="$_raw_tag"
+  local old_slug project new_slug
+  old_slug=$(printf '%s' "$session" | cut -d'/' -f2)
+  project=$(printf '%s' "$session"  | cut -d'@' -f2 | cut -d'/' -f1)
+
+  printf 'rename "%s" → new slug: ' "$old_slug"
+  read -r new_slug
+  new_slug=$(printf '%s' "${new_slug:-}" | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
+  [[ -z "$new_slug" || "$new_slug" == "$old_slug" ]] && return
+
+  local new_session="aid@${project}/${new_slug}"
+  if tmux -L aid has-session -t "$new_session" 2>/dev/null; then
+    printf 'error: session "%s" already exists\n' "$new_session"
+    sleep 1
+    return
+  fi
+
+  tmux -L aid rename-session -t "$session" "$new_session" 2>/dev/null || return
+  local repo; repo=$(_meta_get "$session" "repo_path")
+  _meta_write "$project" "$new_slug" "${repo:-$PWD}"
+  _meta_remove "$session"
+  printf 'renamed → %s\n' "$new_session"
+  sleep 0.4
+}
+
+# ── delete ─────────────────────────────────────────────────────────────────────
+_do_delete() {
+  case "$_raw_tag" in __header__*) return ;; esac
+  local session
+  case "$_raw_tag" in
+    __dead__*) session="${_raw_tag#__dead__}" ;;
+    *)         session="$_raw_tag" ;;
+  esac
+
+  printf 'delete "%s"? [y/N] ' "$session"
+  local confirm; read -r confirm
+  [[ "$confirm" == [yY] ]] || return
+
+  tmux -L aid kill-session -t "$session" 2>/dev/null || true
+  _meta_remove "$session"
+  printf 'deleted.\n'
+  sleep 0.3
+}
+
+# ── toggle-collapse ────────────────────────────────────────────────────────────
+_do_toggle_collapse() {
+  local collapse_file="${AID_SESSIONS_COLLAPSE:-}"
+  [[ -n "$collapse_file" ]] || return 0
+
+  local project
+  case "$_raw_tag" in
+    __header__*) project="${_raw_tag#__header__}" ;;
+    __dead__*)
+      local s="${_raw_tag#__dead__}"
+      project=$(printf '%s' "$s" | cut -d'@' -f2 | cut -d'/' -f1)
+      ;;
+    *) project=$(printf '%s' "$_raw_tag" | cut -d'@' -f2 | cut -d'/' -f1) ;;
+  esac
+  [[ -z "$project" ]] && return 0
+
+  if grep -qxF "$project" "$collapse_file" 2>/dev/null; then
+    grep -vxF "$project" "$collapse_file" > "${collapse_file}.tmp" \
+      && mv "${collapse_file}.tmp" "$collapse_file" || true
+  else
+    printf '%s\n' "$project" >> "$collapse_file"
+  fi
+}
+
+# ── dispatch ───────────────────────────────────────────────────────────────────
+case "$_action" in
+  preview)          _do_preview ;;
+  rename)           _do_rename ;;
+  delete)           _do_delete ;;
+  toggle-collapse)  _do_toggle_collapse ;;
+  *)
+    printf 'aid-sessions-action: unknown action "%s"\n' "$_action" >&2
+    exit 1
+    ;;
+esac

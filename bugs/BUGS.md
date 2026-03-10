@@ -3,6 +3,12 @@
 
 ## Open
 
+### BUG-023: treemux sidebar nvim fails to sync plugins — `E492: Not an editor command: Lazy! sync`
+
+**Status**: open — investigating
+**Repro**: run `aid -i` (or `install.sh` directly); the treemux plugin bootstrap step (`Bootstrapping treemux sidebar plugins`) fails with `E492: Not an editor command: Lazy! sync`.
+**Notes**: the main nvim bootstrap (`Lazy! sync` via `NVIM_APPNAME=nvim`) succeeds. Only the treemux sidebar nvim (`NVIM_APPNAME=treemux`) is affected. Likely cause: the treemux sidebar nvim config (`nvim-treemux/`) does not load the `lazy.nvim` plugin manager at all (treemux uses a minimal config), so `Lazy` is not a recognised command there. `install.sh` probably needs to skip the Lazy sync step for the treemux appname, or use a different bootstrap mechanism (e.g. `packpath` / direct git clone rather than Lazy).
+
 ### BUG-018: bufferline tab bar does not show opened files
 
 **Status**: closed — needs monitoring for confimation

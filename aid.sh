@@ -155,9 +155,11 @@ if [[ -n "$AID_BRANCH" ]]; then
     echo "aid: first run for branch '${AID_BRANCH}' — bootstrapping ${AID_DATA} ..."
     AID_DATA="$AID_DATA" AID_CONFIG="$AID_CONFIG" bash "$_branch_dir/install.sh"
   fi
-  # Re-build the arg list: restore --debug if set, then append remaining args.
+  # Re-build the arg list: restore pre-pass flags, then append remaining args.
   _fwd=()
-  [[ "$AID_DEBUG" -eq 1 ]] && _fwd+=("--debug")
+  [[ "$AID_DEBUG" -eq 1 ]]  && _fwd+=("--debug")
+  [[ -n "$AID_MODE" ]]       && _fwd+=("--mode" "$AID_MODE")
+  [[ "$AID_NO_AI" -eq 1 ]]  && _fwd+=("--no-ai")
   _fwd+=("$@")
   exec "$_branch_aid" "${_fwd[@]+"${_fwd[@]}"}"
 fi
@@ -250,7 +252,7 @@ esac
 if [[ -n "$AID_MODE" ]]; then
   case "$AID_MODE" in
     orchestrator)
-      export AID_DEBUG
+      export AID_DIR AID_DATA AID_CONFIG AID_DEBUG
       exec "$AID_DIR/orchestrator.sh"
       ;;
     *)

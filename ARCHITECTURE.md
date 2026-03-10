@@ -55,7 +55,8 @@ aid               → create a new session in $PWD
 ```
 aid.sh
   ├── resolve AID_DIR via realpath
-  ├── session name: aid@<basename> (deduplicated with numeric suffix)
+  ├── session name: <prefix>@<basename> (deduplicated with numeric suffix)
+  │     prefix = git branch of AID_DIR; "main"/"HEAD"/empty → "aid"
   ├── parse .aidignore (walks up from launch_dir, up to 20 levels)
   ├── gen-tmux-palette.sh (generates tmux/palette.conf from nvim/lua/palette.lua)
   ├── tmux -L aid -f <AID_DIR>/tmux.conf new-session -d -s <session>
@@ -383,7 +384,7 @@ At startup, `treemux_init.lua` populates nvim-tree `filters.custom` from `AID_IG
 ## Key design decisions
 
 - **`aid.sh` is a standalone script, not a shell function**: symlinked into `~/.local/bin/aid` by `install.sh`. `AID_DIR` resolved via `realpath "${BASH_SOURCE[0]}"`. No `aliases.sh`, no shell injection, no `~/.bashrc` modification.
-- **Session routing in `aid.sh`**: `aid` with no args creates a new session. `-a` attaches (interactive list or named). `-l` lists sessions.
+- **Session routing in `aid.sh`**: `aid` with no args creates a new session named `<prefix>@<basename>` where prefix is derived from the git branch of `AID_DIR` (`main`/`HEAD` → `"aid"`, any other branch → the branch name). `-a` attaches (interactive list or named). `-l` lists sessions.
 - **`NVIM_APPNAME=nvim`** (not `nvim-aid`): `XDG_CONFIG_HOME=$AID_DIR` keeps the config source in the repo; `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` point to `~/.local/share/aid`, `~/.local/state/aid`, and `~/.cache/aid` respectively — runtime artefacts land in the standard XDG hierarchy under an aid-specific namespace, not inside the source tree and not in the nvim defaults (`~/.local/share/nvim` etc.).
 - **`tmux -L aid`** for all tmux commands: every script (`aid.sh`, `ensure_treemux.sh`, `sync.lua`) targets the named socket explicitly — no ambiguity about which server is being addressed.
 - **`AID_DIR` env var** exported into the tmux server: `set-environment -g AID_DIR` so all panes and scripts can locate the repo root without assumptions about install path.

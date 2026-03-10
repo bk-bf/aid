@@ -3,16 +3,17 @@
 #
 # Lists all aid/<project>/<slug> tmux sessions grouped by project.
 # Invoked by:
-#   - orchestrator.sh when sessions already exist (attaches / popup)
-#   - tmux.conf prefix+s binding as a popup overlay
-#   - aid-sessions --popup  (same, but called from tmux bind s run-shell)
+#   - orchestrator.sh when sessions already exist
+#   - tmux.conf prefix+s binding: tmux popup -E "$AID_DIR/aid-sessions"
 #
 # Keybinds (inside fzf):
-#   Enter       switch-client to selected session
-#   ctrl-n      create new session (calls orchestrator.sh's _prompt_new_session logic)
-#   ctrl-d      delete selected session (with confirmation)
+#   Enter       switch to selected session
+#   ctrl-n      create new session
+#   ctrl-d      delete selected session (kill tmux session, no confirmation in popup)
+#   ctrl-r      refresh list
+#   esc/ctrl-c  close navigator
 #
-# Requirements: fzf (gracefully errors if absent)
+# Requirements: fzf
 
 set -euo pipefail
 
@@ -22,6 +23,8 @@ set -euo pipefail
 
 _switch() {
   local session="$1"
+  # Close the popup first (if we're inside one), then switch.
+  # tmux popup -E closes on process exit, so just switch-client.
   if [[ -n "${TMUX:-}" ]]; then
     tmux -L aid switch-client -t "$session"
   else
@@ -29,91 +32,101 @@ _switch() {
   fi
 }
 
-_delete_session() {
-  local session="$1"
-  printf "Delete session '%s'? [y/N] " "$session"
-  read -r _confirm
-  if [[ "$_confirm" =~ ^[Yy]$ ]]; then
-    tmux -L aid kill-session -t "$session" 2>/dev/null && echo "deleted."
-  else
-    echo "cancelled."
+# ── Session list builder ──────────────────────────────────────────────────────
+
+_build_list() {
+  # Get all aid/<project>/<slug> sessions sorted by last-attached (most recent first).
+  mapfile -t _all < <(
+    tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \
+      | grep -E ' aid/[^/]+/[^/]+$' \
+      | sort -rn \
+      | awk '{print $2}'
+  )
+
+  if [[ ${#_all[@]} -eq 0 ]]; then
+    return
   fi
+
+  local _current_project=""
+  for _session in "${_all[@]}"; do
+    local _project _slug _activity _now _diff _status _active_marker
+    _project=$(printf '%s' "$_session" | cut -d'/' -f2)
+    _slug=$(printf '%s' "$_session"    | cut -d'/' -f3)
+
+    # Project group header — prefixed with HEADER: so we can skip selection.
+    if [[ "$_project" != "$_current_project" ]]; then
+      _current_project="$_project"
+      printf 'HEADER: %s/\n' "$_project"
+    fi
+
+    # Activity status from pane_last_used timestamp.
+    _activity=$(tmux -L aid list-panes -t "$_session" \
+      -F "#{pane_last_used}" 2>/dev/null | head -1 || printf '0')
+    _now=$(date +%s)
+    _diff=$(( _now - _activity ))
+    if   (( _diff < 60   )); then _status="running  ${_diff}s ago"
+    elif (( _diff < 3600 )); then _status="idle     $(( _diff / 60 ))m ago"
+    else                          _status="idle     $(( _diff / 3600 ))h ago"
+    fi
+
+    # Mark the currently attached session.
+    _active_marker="  "
+    if tmux -L aid display-message -p "#{session_name}" 2>/dev/null | grep -qF "$_session"; then
+      _active_marker="> "
+    fi
+
+    # Format: indent + marker + slug + status + hidden session tag for extraction.
+    printf '    %s%-24s %s\t[%s]\n' "$_active_marker" "$_slug" "$_status" "$_session"
+  done
 }
 
-# ── Build session list ────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
-mapfile -t _all < <(
-  tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \
-    | grep -E ' aid/[^/]+/[^/]+$' \
-    | sort -rn \
-    | awk '{print $2}'
-)
+if ! command -v fzf &>/dev/null; then
+  echo "aid-sessions: fzf not found — install fzf for the session navigator" >&2
+  tmux -L aid list-sessions -F "#{session_name}" 2>/dev/null \
+    | grep -E '^aid/[^/]+/[^/]+$' || true
+  exit 1
+fi
 
-if [[ ${#_all[@]} -eq 0 ]]; then
+_list=$(_build_list)
+
+if [[ -z "$_list" ]]; then
   echo "no orchestrator sessions — run: aid --mode orchestrator"
   exit 0
 fi
 
-if ! command -v fzf &>/dev/null; then
-  echo "aid-sessions: fzf not found — install fzf for the session navigator" >&2
-  echo ""
-  echo "Sessions:"
-  for s in "${_all[@]}"; do echo "  $s"; done
-  exit 0
-fi
-
-# Build fzf input: group by project with header lines.
-# Format: each line is the full session name; project headers prefixed with "> "
-# so fzf's --header-lines won't interfere with selection.
-_fzf_input=""
-_current_project=""
-for _session in "${_all[@]}"; do
-  # session format: aid/<project>/<slug>
-  _project=$(echo "$_session" | cut -d'/' -f2)
-  _slug=$(echo "$_session"    | cut -d'/' -f3)
-
-  # Emit a non-selectable project header when the project changes.
-  if [[ "$_project" != "$_current_project" ]]; then
-    _current_project="$_project"
-    _fzf_input+=$'\n'"  -- ${_project}/ --"
-  fi
-
-  # Determine running/idle status: check if the session's pane 0 has recent activity.
-  _activity=$(tmux -L aid list-panes -t "$_session" \
-    -F "#{pane_last_used}" 2>/dev/null | head -1 || echo "0")
-  _now=$(date +%s)
-  _diff=$(( _now - _activity ))
-  if   (( _diff < 60  )); then _status="running  ${_diff}s ago"
-  elif (( _diff < 3600)); then _status="idle     $(( _diff/60 ))m ago"
-  else                         _status="idle     $(( _diff/3600 ))h ago"
-  fi
-
-  _fzf_input+=$'\n'"    ${_slug}    ${_status}    [${_session}]"
-done
-
-# ── fzf picker ───────────────────────────────────────────────────────────────
-
-# Extract the full session name from the bracket annotation on the selected line.
-_selected=$(echo "$_fzf_input" | grep -v '^\s*$' | fzf \
-  --prompt="session> " \
-  --header="Enter:switch  Ctrl-N:new  Ctrl-D:delete" \
+# Feed into fzf.
+# HEADER: lines are rendered but excluded from selection via --nth and the
+# extraction step (they contain no [bracket] tag so grep returns empty).
+_selected=$(printf '%s\n' "$_list" | fzf \
+  --prompt="  session › " \
+  --header="  enter:switch  ctrl-n:new  ctrl-d:delete  esc:close" \
   --no-sort \
   --ansi \
-  --bind "ctrl-n:execute(echo __new__)+abort" \
-  --bind "ctrl-d:execute(echo __del__:{q})+abort" \
-  | grep -oP '\[aid/[^\]]+\]' | tr -d '[]' || true)
+  --nth=1,2 \
+  --delimiter='\t' \
+  --with-nth=1 \
+  --bind "ctrl-n:execute(printf '__new__')+abort" \
+  --bind "ctrl-d:execute(printf '__del__%s' {+})+abort" \
+  --color "header:italic:dim,prompt:blue,pointer:blue" \
+  | grep -oE '\[aid/[^]]+\]' | tr -d '[]' || true)
 
-case "$_selected" in
+case "${_selected:-}" in
   "")
-    # Nothing selected or user escaped.
     exit 0
     ;;
   __new__)
     exec "$AID_DIR/orchestrator.sh"
     ;;
-  __del__:*)
-    _target="${_selected#__del__:}"
-    _delete_session "$_target"
+  __del__*)
+    # Extract the session name from the bracket tag in the line.
+    _target=$(printf '%s' "$_selected" | grep -oE '\[aid/[^]]+\]' | tr -d '[]' || true)
+    if [[ -n "$_target" ]]; then
+      tmux -L aid kill-session -t "$_target" 2>/dev/null || true
+    fi
+    # Reopen navigator after delete.
+    exec "$AID_DIR/aid-sessions"
     ;;
   aid/*)
     _switch "$_selected"

@@ -17,12 +17,13 @@ XDG_CACHE_HOME="$HOME/.cache/aid"
 OPENCODE_CONFIG_DIR="$AID_DIR/opencode"
 OPENCODE_TUI_CONFIG="$AID_DIR/opencode/tui.json"
 
-# ── Debug mode + branch pre-pass ─────────────────────────────────────────────
-# Consume -d/--debug and --branch before the main case so they compose
-# with other flags.  e.g. `aid --debug --branch T-009` works correctly.
+# ── Debug mode + branch + no-ai pre-pass ─────────────────────────────────────
+# Consume -d/--debug, --branch, and --no-ai before the main case so they
+# compose with other flags.  e.g. `aid --no-ai --debug --branch T-009` works.
 # AID_BRANCH="" means flag absent; AID_BRANCH="__interactive__" means --branch
 # with no value (show interactive remote branch picker).
 AID_DEBUG=0
+AID_NO_AI=0
 AID_BRANCH=""
 _branch_flag=0   # 1 once --branch is seen
 _args=()
@@ -45,6 +46,8 @@ for _arg in "$@"; do
   case "$_arg" in
     -d|--debug)
       AID_DEBUG=1 ;;
+    --no-ai)
+      AID_NO_AI=1 ;;
     --branch)
       _branch_flag=1
       # value expected as next arg
@@ -169,6 +172,7 @@ aid — AI-assisted dev environment
 
 Usage:
   aid                        launch new session in current directory
+  aid --no-ai                launch without the opencode pane (editor + sidebar only)
   aid -a, --attach           interactive session list to attach to
   aid -a <name>              attach directly to named session
   aid -i, --install          (re)run install.sh — install/update plugins and symlinks
@@ -365,13 +369,16 @@ dbg "editor_pane_id=$editor_pane_id"
 
 # Split right: opencode occupies 29% of width, spawned directly into opencode
 # (no shell prompt — avoids zsh intercept, send-keys mangling, autocorrect).
-dbg "splitting opencode pane"
-tmux -L aid split-window -h -p 29 -t "$editor_pane_id" \
-  "OPENCODE_CONFIG_DIR=$(printf '%q' "$OPENCODE_CONFIG_DIR") OPENCODE_TUI_CONFIG=$(printf '%q' "$OPENCODE_TUI_CONFIG") opencode $(printf '%q' "$launch_dir")"
-opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_left}" \
-  | sort -k2 -n | tail -1 | cut -d' ' -f1)
-dbg "opencode_pane_id=$opencode_pane_id"
-tmux -L aid select-pane -t "$editor_pane_id"
+# Skipped when --no-ai is set (T-009).
+if [[ "$AID_NO_AI" -eq 0 ]]; then
+  dbg "splitting opencode pane"
+  tmux -L aid split-window -h -p 29 -t "$editor_pane_id" \
+    "OPENCODE_CONFIG_DIR=$(printf '%q' "$OPENCODE_CONFIG_DIR") OPENCODE_TUI_CONFIG=$(printf '%q' "$OPENCODE_TUI_CONFIG") opencode $(printf '%q' "$launch_dir")"
+  dbg "opencode_pane_id=$(tmux -L aid list-panes -t "$session" -F "#{pane_id} #{pane_left}" | sort -k2 -n | tail -1 | cut -d' ' -f1)"
+  tmux -L aid select-pane -t "$editor_pane_id"
+else
+  dbg "--no-ai set: skipping opencode pane"
+fi
 
 # Open treemux sidebar: run-shell -t executes inside the aid server with $TMUX
 # and $TMUX_PANE set, which toggle.sh's bare tmux calls require.

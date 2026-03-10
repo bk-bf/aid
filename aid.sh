@@ -25,7 +25,6 @@ OPENCODE_TUI_CONFIG="$AID_DIR/opencode/tui.json"
 AID_DEBUG=0
 AID_NO_AI=0
 AID_BRANCH=""
-_branch_flag=0   # 1 once --branch is seen
 _args=()
 _skip_next=0
 for _arg in "$@"; do
@@ -49,11 +48,9 @@ for _arg in "$@"; do
     --no-ai)
       AID_NO_AI=1 ;;
     --branch)
-      _branch_flag=1
       # value expected as next arg
       _skip_next=1 ;;
     --branch=*)
-      _branch_flag=1
       AID_BRANCH="${_arg#*=}"
       [[ -z "$AID_BRANCH" ]] && AID_BRANCH="__interactive__" ;;
     *)
@@ -262,7 +259,7 @@ dbg "session=$session"
 _tmpl_dir="$AID_DIR/nvim/templates"
 _bootstrap_file() {
   local name="$1" found=0 dir="$launch_dir"
-  for _i in $(seq 1 20); do
+  for _i in {1..20}; do
     [[ -f "$dir/$name" ]] && { found=1; break; }
     local parent; parent="$(dirname "$dir")"
     [[ "$parent" == "$dir" ]] && break
@@ -280,7 +277,7 @@ _bootstrap_file "opencode.json"
 # Parse .aidignore (walks up from launch_dir) and build AID_IGNORE=comma,separated,list.
 _aidignore_file=""
 _dir="$launch_dir"
-for _i in $(seq 1 20); do
+for _i in {1..20}; do
   if [[ -f "$_dir/.aidignore" ]]; then
     _aidignore_file="$_dir/.aidignore"
     break

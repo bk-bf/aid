@@ -101,15 +101,15 @@ echo "==> Bootstrapping treemux sidebar plugins (lazy sync)..."
 XDG_CONFIG_HOME="$AID_CONFIG" XDG_DATA_HOME="$_XDG_DATA" XDG_STATE_HOME="$_XDG_STATE" XDG_CACHE_HOME="$_XDG_CACHE" \
   NVIM_APPNAME=treemux nvim --headless "+Lazy! sync" +qa &
 _nvim_pid=$!
-_spin "syncing treemux plugins…" $_nvim_pid
-wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
+_spin "syncing treemux plugins…" "$_nvim_pid"
+wait "$_nvim_pid" || echo "  (headless sync exited non-zero — likely fine on first run)"
 
 echo "==> Bootstrapping main nvim plugins (lazy sync)..."
 XDG_CONFIG_HOME="$AID" XDG_DATA_HOME="$_XDG_DATA" XDG_STATE_HOME="$_XDG_STATE" XDG_CACHE_HOME="$_XDG_CACHE" \
   NVIM_APPNAME=nvim nvim --headless "+Lazy! sync" +qa &
 _nvim_pid=$!
-_spin "syncing nvim plugins…" $_nvim_pid
-wait $_nvim_pid || echo "  (headless sync exited non-zero — likely fine on first run)"
+_spin "syncing nvim plugins…" "$_nvim_pid"
+wait "$_nvim_pid" || echo "  (headless sync exited non-zero — likely fine on first run)"
 
 # ── 6. Shell integration — symlink aid into PATH ─────────────────────────────
 # Only wire the PATH symlink for the production install (AID_DATA == default).

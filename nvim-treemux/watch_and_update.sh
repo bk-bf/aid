@@ -32,7 +32,7 @@ PYTHON_COMMAND="$9"
 
 echo "$NVIM_COMMAND"
 
-echo "$0 $@"
+echo "$0" "$@"
 echo "OSTYPE: $OSTYPE"	# log OS type
 tmux -V					# log tmux version
 
@@ -117,7 +117,7 @@ while [[ $main_pane_exists -eq 1 ]] && [[ $side_pane_exists -eq 1 ]]; do
 	main_pane_cwd=$(lsof -a -d cwd -p "$main_pane_pid" 2> /dev/null | awk_by_name '{print $(f["NAME"])}' | tail -n +2)
 	# This does not work on MacOS.
 	#main_pane_cwd=$(readlink -f "/proc/$main_pane_pid/cwd")
-	echo $main_pane_cwd
+	echo "$main_pane_cwd"
 
 	if [[ -z "$main_pane_cwd" ]]
 	then

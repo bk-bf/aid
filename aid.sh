@@ -187,6 +187,16 @@ tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "$session" \
 # immediately on attach.
 tmux -L aid source-file "$AID_DIR/tmux/palette.conf"
 
+# Pre-seed the vimbridge cat strings as the session-local status-left/right.
+# tpipeline's fork_job() snapshots whatever status-left/right currently are
+# as its restore target (tpipeline_restore=1). If the snapshot captures the
+# palette.conf strings, every FocusLost restores the palette fallback instead
+# of the vimbridge cats — breaking the bar on non-editor panes. By setting the
+# cats here (before nvim/tpipeline start), fork_job() captures the correct
+# restore target and FocusLost restores the live vimbridge content.
+tmux -L aid set-option -t "$session" status-left  "#(cat #{socket_path}-\#{session_id}-vimbridge)"
+tmux -L aid set-option -t "$session" status-right "#(cat #{socket_path}-\#{session_id}-vimbridge-R)"
+
 # Export key vars into the tmux server so every pane inherits them.
 # XDG_CONFIG_HOME is intentionally absent — setting it globally would make
 # every pane shell treat $AID_DIR as its config home (see ARCHITECTURE.md).

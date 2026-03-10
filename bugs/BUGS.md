@@ -3,12 +3,6 @@
 
 ## Open
 
-### BUG-023: treemux sidebar nvim fails to sync plugins — `E492: Not an editor command: Lazy! sync`
-
-**Status**: open — investigating
-**Repro**: run `aid -i` (or `install.sh` directly); the treemux plugin bootstrap step (`Bootstrapping treemux sidebar plugins`) fails with `E492: Not an editor command: Lazy! sync`.
-**Notes**: the main nvim bootstrap (`Lazy! sync` via `NVIM_APPNAME=nvim`) succeeds. Only the treemux sidebar nvim (`NVIM_APPNAME=treemux`) is affected. Likely cause: the treemux sidebar nvim config (`nvim-treemux/`) does not load the `lazy.nvim` plugin manager at all (treemux uses a minimal config), so `Lazy` is not a recognised command there. `install.sh` probably needs to skip the Lazy sync step for the treemux appname, or use a different bootstrap mechanism (e.g. `packpath` / direct git clone rather than Lazy).
-
 ### BUG-018: bufferline tab bar does not show opened files
 
 **Status**: closed — needs monitoring for confimation
@@ -30,6 +24,13 @@
 
 ## Watching
 *Bugs that have been observed once but not reproduced. Kept separate from Open to avoid action pressure. Promote to Open if reproduced; close if never seen again.*
+
+### BUG-023: treemux sidebar nvim fails to load plugins — `module 'nvim-tree.api' not found`
+
+**Status**: watching — fix applied 2026-03-10, needs confirmation
+**Repro**: launch `aid`; the treemux sidebar shows `E5108: Error executing lua … module 'nvim-tree.api' not found` on startup.
+**Root cause**: `ensure_treemux.sh` read `@treemux-key-Tab` via `show-option -gqv`, which returns the raw unexpanded option value. The value contains nested tmux format strings (`#{E:AID_CONFIG}`) that the shell cannot interpret, so nvim received a nonexistent path as its `-u` init file and started without any config or plugins.
+**Fix**: replaced `show-option -gqv '@treemux-key-Tab'` with `display-message -p '#{E:@treemux-key-Tab}'` in `main/ensure_treemux.sh` so tmux expands the format strings before the shell sees the value. Needs a live session test to confirm.
 
 ### BUG-015: E5560 "writefile must not be called in a fast event context" after lazygit commit
 

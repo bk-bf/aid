@@ -117,7 +117,7 @@ case "${_selected:-}" in
     exit 0
     ;;
   __new__)
-    exec "$AID_DIR/orchestrator.sh"
+    exec "$AID_DIR/orchestrator.sh" --new
     ;;
   __del__*)
     # Extract the session name from the bracket tag in the line.

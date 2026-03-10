@@ -198,11 +198,14 @@ _prompt_new_session() {
   local default_project default_slug default_repo
   default_repo="$PWD"
   default_project=$(basename "$PWD" | sed 's/^\.*//' | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
+  # Derive slug from branch name; fall back to "main" if not in a git repo or on a detached HEAD.
   default_slug=$(git -C "$PWD" rev-parse --abbrev-ref HEAD 2>/dev/null \
-    | sed 's|.*/||' | tr -cs '[:alnum:]-_' '-' | sed 's/-$//' || echo "main")
+    | grep -v '^HEAD$' \
+    | sed 's|.*/||' | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
+  [[ -z "$default_slug" ]] && default_slug="main"
 
   echo ""
-  echo "aid orchestrator — create first session"
+  echo "aid orchestrator — new session"
   echo ""
   printf "  project [%s]: " "$default_project"
   read -r _project
@@ -216,6 +219,9 @@ _prompt_new_session() {
   read -r _repo
   _repo="${_repo:-$default_repo}"
 
+  # Expand ~ manually since read doesn't do shell expansion.
+  _repo="${_repo/#\~/$HOME}"
+
   if [[ ! -d "$_repo" ]]; then
     echo "aid: repo path '$_repo' does not exist" >&2
     exit 1
@@ -227,6 +233,13 @@ _prompt_new_session() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 _ensure_server
+
+# --new flag: skip the existing-sessions branch and go straight to the prompt.
+# Used by aid-sessions ctrl-n to create a new session from inside the navigator.
+if [[ "${1:-}" == "--new" ]]; then
+  _prompt_new_session
+  exit 0
+fi
 
 # Count existing aid/<project>/<slug> sessions (exclude aid/dashboard).
 _existing=$(tmux -L aid list-sessions -F "#{session_name}" 2>/dev/null \
@@ -241,8 +254,8 @@ else
   dbg "existing sessions found, opening navigator"
   if [[ -n "${TMUX:-}" ]]; then
     # Already inside tmux: open the navigator as a popup overlay.
-    tmux -L aid popup -d "#{pane_current_path}" -w 60% -h 80% -E \
-      "$AID_DIR/aid-sessions"
+    tmux -L aid display-popup -E -w 70% -h 60% \
+      "AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR")/aid-sessions"
   else
     # Outside tmux: attach to the most recently active aid/* session.
     _last=$(tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \

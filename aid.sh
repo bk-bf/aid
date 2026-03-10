@@ -59,6 +59,7 @@ Usage:
   aid -a, --attach      interactive session list to attach to
   aid -a <name>         attach directly to named session
   aid -i, --install     (re)run install.sh — install/update plugins and symlinks
+  aid --update          pull latest aid + re-run install.sh (alias for -i)
   aid -l, --list        list running sessions
   aid -d, --debug       verbose output (set -x + step tracing)
   aid -h, --help        show this help
@@ -69,7 +70,7 @@ EOF
     tmux -L aid list-sessions 2>/dev/null || echo "no aid sessions"
     exit
     ;;
-  -i|--install)
+  -i|--install|--update)
     exec "$AID_DIR/boot.sh"
     ;;
   -a|--attach)

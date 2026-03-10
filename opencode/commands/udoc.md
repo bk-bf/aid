@@ -59,19 +59,22 @@ Rules:
 
 ## Step 4 — Extract finished tasks → archive
 
+**Do not archive automatically.** Only move completed roadmap items, closed bugs, or superseded ADRs to `docs/features/archive/` when the user explicitly asks. Skip this step unless the user's request includes an instruction to archive.
+
+When the user does ask to archive:
+
 ### ROADMAP.md
 
-Move every item in the `## Done` section whose date is **more than 3 months ago** from `ROADMAP.md` into the archive:
+Move completed items from `ROADMAP.md` into the archive:
 
-1. Create the archive file if it does not exist: `aid/docs/archive/ROADMAP-<YYYY-MM-DD>.md`
+1. Create the archive file if it does not exist: `aid/docs/features/archive/ROADMAP-<YYYY-MM-DD>.md`
    - Header: `# Roadmap archive — items completed before <YYYY-MM-DD>`
 2. Append the extracted items verbatim to the archive file.
-3. Remove them from the `## Done` section of `ROADMAP.md`.
-4. Leave items completed within the last 3 months in `## Done` — they are still relevant context for current work.
+3. Remove the extracted items from `ROADMAP.md`. If the `## Done` section is now empty, remove the section header too.
 
 ### BUGS.md
 
-Move every item in the `## Closed` section that is **referenced nowhere in any currently open roadmap item, ADR, or open bug** into `aid/docs/archive/BUGS-<YYYY-MM-DD>.md` following the same pattern. Closed bugs still cross-referenced by open work stay in `BUGS.md`.
+Move closed bug items into `aid/docs/features/archive/BUGS-<YYYY-MM-DD>.md` following the same pattern. Only move bugs that are referenced nowhere in any currently open roadmap item, ADR, or open bug.
 
 ---
 
@@ -80,7 +83,7 @@ Move every item in the `## Closed` section that is **referenced nowhere in any c
 After archiving, scan the documentation for:
 
 - References to archived items (now gone from main docs) — remove or replace with a note: `(see archive)`
-- ADRs in `DECISIONS.md` that are marked `**Status**: Superseded` and are also referenced nowhere else — move them to `aid/docs/archive/DECISIONS-<YYYY-MM-DD>.md` and leave a one-line stub under `## Superseded` linking to the archive file.
+- ADRs in `DECISIONS.md` that are marked `**Status**: Superseded` — only move them to `aid/docs/features/archive/DECISIONS-<YYYY-MM-DD>.md` if the user explicitly asks to archive. Otherwise leave them in place and leave a one-line stub under `## Superseded` if the user requests the move.
 - Any ADR whose status has changed (e.g. an **Under consideration** ADR that has since been decided) — update the `**Status**` field, move it to the correct section (`## Made` or `## Superseded`), and add the `**Decision**` and `**Reason**` fields if they were absent.
 - Any wording that describes a plan, intention, or TODO that has since been implemented — replace with the factual description of the implemented behaviour.
 
@@ -103,7 +106,7 @@ Do not create roadmap entries for closed bugs unless their "final solution" sect
 Scan all target docs for `<!-- inferred:` comments left by `/spec`:
 
 ```bash
-grep -rn "<!-- inferred:" docs/
+grep -rn "<!-- inferred:" aid/docs/
 ```
 
 For each one found:

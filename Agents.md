@@ -4,8 +4,9 @@
 ## Agent rules
 
 - **Never commit or push to git unprompted.** Always wait for the user to explicitly ask, or for a slash command (e.g. `/commit`) to trigger it. This applies even when completing a large task — finish all code changes, then stop and wait. The user may have staged changes of their own that must not be conflated into your commit.
-- **Roadmap task references**: open tasks in `docs/ROADMAP.md` are numbered `T-NNN` (e.g. `T-002`). When referencing a roadmap item in code comments, ADRs, bug notes, or commit messages, use the task number, not a description.
+- **Roadmap task references**: open tasks in `docs/features/open/ROADMAP.md` are numbered `T-NNN` (e.g. `T-002`). When referencing a roadmap item in code comments, ADRs, bug notes, or commit messages, use the task number, not a description.
 - **Date format**: always use `YYYY-MM-DD` (e.g. `2026-03-09`). Never use `YYYY-MM` alone. This applies everywhere: ADR `**Date**` fields, bug report `**First appeared**` / `**Fixed**` fields, roadmap `## Done` entries (`- [x] **YYYY-MM-DD**: ...`), LOC cap `updated:` comments, and archive filenames (`BUGS-YYYY-MM-DD.md`, `DECISIONS-YYYY-MM-DD.md`).
+- **Archiving completed items**: never move completed roadmap items, closed bugs, or superseded ADRs to `docs/features/archive/` unless the user explicitly asks. Completed items stay in their current file until the user requests archiving.
 - **No architecture content in this file.** This file is orientation only. All architecture detail lives in `docs/` — see the reference section at the bottom. Do not add environment variables, pane layouts, plugin lists, isolation mechanisms, symlink maps, or boot/session sequences here. If you find yourself writing that kind of content, put it in `docs/ARCHITECTURE.md` instead.
 
 ## What this repo is
@@ -43,9 +44,15 @@ aid/                            ← bare git repo root
 │   └── Agents.md
 └── docs/                       ← dev-docs branch worktree (orphan, never merge into master)
     ├── ARCHITECTURE.md
-    ├── ROADMAP.md
     ├── DECISIONS.md
-    └── BUGS.md
+    ├── PHILOSOPHY.md
+    ├── bugs/
+    │   └── BUGS.md
+    └── features/
+        ├── open/
+        │   └── ROADMAP.md      # open tasks (T-NNN), deferred items, phase plan
+        └── archive/
+            └── ROADMAP-*.md    # completed items moved here by /udoc
 ```
 
 ## btca — documentation assistant
@@ -78,6 +85,8 @@ All architecture detail lives in the `docs/` worktree (`dev-docs` branch). Start
 | File | Contents |
 |---|---|
 | `docs/ARCHITECTURE.md` | Environment isolation, boot sequence, pane layout, env vars, sync.lua, aidignore, hot-reload, plugin lists |
-| `docs/ROADMAP.md` | Open tasks (`T-NNN`), Done items, and the bug cross-reference index |
+| `docs/features/open/ROADMAP.md` | Open tasks (`T-NNN`), deferred items, and the bug cross-reference index |
+| `docs/features/archive/ROADMAP-*.md` | Completed roadmap items archived by `/udoc` |
 | `docs/DECISIONS.md` | Architecture Decision Records (ADR-001 … ADR-NNN) |
+| `docs/PHILOSOPHY.md` | Design principles, seam rule, target user profile, scope constraints |
 | `docs/bugs/BUGS.md` | All bug reports and their status |

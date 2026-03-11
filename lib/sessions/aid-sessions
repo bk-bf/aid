@@ -558,7 +558,7 @@ while true; do
     --bind "start:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s START start fired: want_pos=${_start_pos} FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    )+pos(${_start_pos})" \
+    )+pos(${_start_pos})+unbind(enter)+unbind(n)+unbind(r)+unbind(d)" \
     --bind "ctrl-r:transform:${_rld} ctrl-r" \
     --bind "result:execute-silent:
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
@@ -568,10 +568,10 @@ while true; do
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
     " \
-    --bind "load:execute-silent:
+    --bind "load:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s LOAD  load fired: FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    " \
+    )+rebind(enter)+rebind(n)+rebind(r)+rebind(d)" \
     --bind "up:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s KEY   up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}

@@ -60,10 +60,15 @@ if ! command -v fzf &>/dev/null; then
 fi
 
 # AID_CALLER_CLIENT — tty of the terminal that opened this navigator.
-# Inherited from orchestrator.sh when launched via display-popup; derived from
-# TMUX_PANE when launched directly.  Kept stable across all sub-popup re-execs.
-if [[ -z "${AID_CALLER_CLIENT:-}" && -n "${TMUX_PANE:-}" ]]; then
-  AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+# Inherited from orchestrator.sh when launched via display-popup; derived here
+# otherwise.  Resolution order: inherited > TMUX_PANE lookup > tty fallback.
+if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+  fi
+  if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
+    AID_CALLER_CLIENT=$(tty 2>/dev/null || true)
+  fi
 fi
 export AID_CALLER_CLIENT
 

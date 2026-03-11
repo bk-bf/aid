@@ -22,12 +22,21 @@ source "$AID_DIR/lib/sessions/aid-meta"
 dbg() { [[ "${AID_DEBUG:-0}" -eq 1 ]] && echo "[orc:debug] $*" >&2 || true; }
 
 # AID_CALLER_CLIENT — the tty of the terminal that launched this orchestrator
-# invocation (e.g. /dev/pts/3).  Resolved once here from $TMUX_PANE so that
-# every display-popup -c and switch-client -c targets the exact right terminal
-# no matter how many re-execs or sub-popups occur.
-# If already set (re-exec inside a popup), keep the inherited value.
-if [[ -z "${AID_CALLER_CLIENT:-}" && -n "${TMUX_PANE:-}" ]]; then
-  AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+# invocation (e.g. /dev/pts/3).  Resolved once here so that every
+# display-popup -c and switch-client -c targets the exact right terminal no
+# matter how many re-execs or sub-popups occur.
+# Resolution order (first non-empty wins):
+#   1. Already set (re-exec inside a popup) — keep it.
+#   2. Inside the aid tmux server: ask tmux for the client attached to TMUX_PANE.
+#   3. Fallback: the calling terminal's own tty (works from plain terminals and
+#      from inside any other tmux server — covers the normal launch path).
+if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+  fi
+  if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
+    AID_CALLER_CLIENT=$(tty 2>/dev/null || true)
+  fi
 fi
 export AID_CALLER_CLIENT
 

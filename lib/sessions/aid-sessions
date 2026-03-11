@@ -49,6 +49,7 @@ trap 'printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 
 # ── Caller client resolution ──────────────────────────────────────────────────
 # Used to target display-popup and switch-client to the correct terminal.
+_dbg INIT "resolving caller client"
 if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
   if [[ -n "${TMUX_PANE:-}" ]]; then
     AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" \
@@ -59,10 +60,12 @@ if [[ -z "${AID_CALLER_CLIENT:-}" ]]; then
   fi
 fi
 export AID_CALLER_CLIENT
+_dbg INIT "caller client resolved: ${AID_CALLER_CLIENT:-<none>}"
 
 # ── Self-heal: ensure our own session is tagged as orchestrator ───────────────
 # Sessions spawned before this tag logic existed (or after a restart) may be
 # missing the @aid_mode option.  Tag ourselves now so aid-sessions-list finds us.
+_dbg INIT "self-heal: checking @aid_mode tag"
 if [[ -n "${TMUX_PANE:-}" ]]; then
   _self_session=$(tmux -L aid display-message -t "$TMUX_PANE" \
     -p "#{session_name}" 2>/dev/null || true)
@@ -74,6 +77,7 @@ if [[ -n "${TMUX_PANE:-}" ]]; then
     fi
   fi
 fi
+_dbg INIT "self-heal done"
 
 _dbg INIT "aid-sessions starting (pid=$$, pane=${TMUX_PANE:-?}, port will be assigned below)"
 
@@ -97,7 +101,9 @@ _prune_dead_sessions() {
   done <<< "$_all_meta"
   [[ "$_pruned" -gt 0 ]] && _dbg PRUNE "pruned ${_pruned} dead session(s) from metadata"
 }
+_dbg PRUNE "starting dead session prune"
 _prune_dead_sessions
+_dbg PRUNE "prune done"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

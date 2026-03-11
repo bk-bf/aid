@@ -329,8 +329,13 @@ else
   fi
   if [[ "$_in_aid_server" -eq 1 ]]; then
     # Already inside the aid server: open the navigator as a popup overlay.
-    tmux -L aid display-popup -E -w 70% -h 60% \
-      "AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
+    # Pass the caller pane so the navigator (and any sub-popups it spawns)
+    # target the correct client throughout the whole interaction chain.
+    _nav_pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
+    _nav_t=()
+    [[ -n "$_nav_pane" ]] && _nav_t=(-t "$_nav_pane")
+    tmux -L aid display-popup -E -w 70% -h 60% "${_nav_t[@]}" \
+      "AID_CALLER_PANE=$(printf '%q' "${_nav_pane:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
   else
     # Outside the aid server (plain terminal or a different tmux server): run
     # the session navigator directly so the user can pick or create a session.

@@ -191,6 +191,8 @@ _act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(print
 _lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
 
 # Background auto-refresh: every 5 s send a reload command to fzf via --listen.
+# Use transform so we can read $FZF_POS before reloading and restore it after,
+# preventing the cursor from jumping to the top while the user is browsing.
 (
   # Give fzf a moment to start and bind to the port.
   sleep 2
@@ -199,7 +201,7 @@ _lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(pr
     curl -sf --max-time 1 \
       -X POST \
       "http://127.0.0.1:${_fzf_port}" \
-      -d "reload(${_lst} 2>/dev/null || true)" \
+      -d "transform:echo \"reload(${_lst} 2>/dev/null || true)+pos(\${FZF_POS:-1})\"" \
       >/dev/null 2>&1 || true
   done
 ) &
@@ -222,7 +224,6 @@ _output=$(printf '' | fzf \
   --layout=reverse-list \
   --no-sort \
   --no-input \
-  --track \
   --ansi \
   --delimiter=$'\t' \
   --with-nth=1 \
@@ -233,7 +234,7 @@ _output=$(printf '' | fzf \
   --preview-label=' info ' \
   --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
   --bind "start:reload(${_lst} 2>/dev/null || true)" \
-  --bind "ctrl-r:reload(${_lst} 2>/dev/null || true)" \
+  --bind "ctrl-r:transform:echo \"reload(${_lst} 2>/dev/null || true)+pos(\${FZF_POS:-1})\"" \
   --bind "esc:abort" \
   --bind "q:abort" \
   2>/dev/null \

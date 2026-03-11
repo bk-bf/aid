@@ -250,12 +250,16 @@ if [[ "${1:-}" == "--resurrect" ]]; then
   exit 0
 fi
 
-# Count existing aid@<project>/<slug> sessions (exclude aid@dashboard).
-_existing=$(tmux -L aid list-sessions -F "#{session_name}" 2>/dev/null \
-  | grep -cE '^aid@[^/]+/[^/]+$' || true)
+# Check whether there are any sessions to show in the navigator for this
+# branch install.  We use aid-sessions-list (which unions live tmux sessions
+# with dead entries from the branch's sessions.json) rather than a raw tmux
+# count so that sessions owned by other aid installs sharing the same tmux
+# server don't falsely prevent the new-session prompt from appearing.
+_existing_list=$(AID_SESSIONS_COLLAPSE="" \
+  "$AID_DIR/lib/sessions/aid-sessions-list" 2>/dev/null || true)
 
-if [[ "$_existing" -eq 0 ]]; then
-  # First run — prompt for a session and spawn it.
+if [[ -z "$_existing_list" ]]; then
+  # No sessions known to this branch install — prompt for a first one.
   _prompt_new_session
 else
   # Sessions already exist — open the navigator so the user can pick one or
@@ -272,7 +276,7 @@ else
   if [[ "$_in_aid_server" -eq 1 ]]; then
     # Already inside the aid server: open the navigator as a popup overlay.
     tmux -L aid display-popup -E -w 70% -h 60% \
-      "AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
+      "AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
   else
     # Outside the aid server (plain terminal or a different tmux server): run
     # the session navigator directly so the user can pick or create a session.

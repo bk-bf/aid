@@ -31,6 +31,13 @@
 #
 # Environment:
 #   AID_DEBUG_LOG  — if set, debug lines are appended to this file
+#
+# Implementation note:
+#   Menu item commands use native tmux `set-environment -g` to record the
+#   chosen label in the tmux global environment.  This runs synchronously in
+#   the tmux server when the item is selected, so the answer is always
+#   available immediately after `display-menu` returns — no fifo or run-shell
+#   needed.
 
 set -euo pipefail
 
@@ -69,18 +76,21 @@ _dbg() {
   printf '%s POPUP %s\n' "$_ms" "$*" >> "$AID_DEBUG_LOG"
 }
 
+# ── Unique environment variable for this invocation ───────────────────────────
+# Use a per-invocation variable name so nested/concurrent popups don't collide.
+_envvar="AID_POPUP_$$"
+
+# Seed the variable as empty so show-environment always finds it.
+tmux -L aid set-environment -g "$_envvar" ""
+
+_dbg "envvar=${_envvar} title='${_title}' items=$*"
+
 # ── Build menu items ──────────────────────────────────────────────────────────
 # display-menu takes:  name  key  command  [name key command ...]
-# Separator:           ""    ""   ""
 #
-# We write the chosen label into a fifo via run-shell.
-_fifo=$(mktemp -u /tmp/aid-popup-XXXXXX)
-mkfifo "$_fifo"
-_dbg "fifo=${_fifo} title='${_title}' items=$*"
-
-# Escape the fifo path once for embedding in the run-shell commands.
-_fifo_q=$(printf '%q' "$_fifo")
-
+# Each item command is a native tmux `set-environment` call — it runs
+# synchronously inside the tmux server when the item is selected, so the value
+# is present the moment display-menu returns.
 _menu_args=()
 for _item in "$@"; do
   if [[ "$_item" == "-" ]]; then
@@ -96,19 +106,10 @@ for _item in "$@"; do
     _label="$_item"
     _key=""
   fi
-  # run-shell command: write label to fifo so the blocking read below unblocks.
-  _cmd="run-shell 'printf %s $(printf '%q' "$_label") > ${_fifo_q}'"
-  _menu_args+=("$_label" "$_key" "$_cmd")
+  _menu_args+=("$_label" "$_key" "set-environment -g ${_envvar} $(printf '%q' "$_label")")
 done
 
-# ── Guard: fires if user presses Escape (menu dismissed with no selection) ────
-(
-  sleep "$_timeout"
-  printf '' > "$_fifo" 2>/dev/null || true
-) &
-_guard_pid=$!
-
-# ── Show the menu ─────────────────────────────────────────────────────────────
+# ── Show the menu (blocks until user picks or presses Escape) ─────────────────
 tmux -L aid display-menu \
   -T " ${_title} " \
   -x "$_x" \
@@ -121,9 +122,12 @@ tmux -L aid display-menu \
 sleep 0.15
 
 # ── Collect answer ────────────────────────────────────────────────────────────
-_answer=$(cat "$_fifo" 2>/dev/null || true)
-kill "$_guard_pid" 2>/dev/null || true
-rm -f "$_fifo"
+# show-environment prints "VAR=value"; strip the "VAR=" prefix.
+_raw=$(tmux -L aid show-environment -g "$_envvar" 2>/dev/null || true)
+_answer="${_raw#"${_envvar}="}"
+
+# Clean up the environment variable.
+tmux -L aid set-environment -g -u "$_envvar" 2>/dev/null || true
 
 _dbg "answer='${_answer:-<dismissed>}'"
 printf '%s' "$_answer"

@@ -222,6 +222,7 @@ _output=$(printf '' | fzf \
   --layout=reverse-list \
   --no-sort \
   --no-input \
+  --track \
   --ansi \
   --delimiter=$'\t' \
   --with-nth=1 \

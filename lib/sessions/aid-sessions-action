@@ -84,7 +84,7 @@ _do_rename() {
   new_slug=$(printf '%s' "$old_slug" \
     | fzf --print-query \
           --query="$old_slug" \
-          --bind='enter:accept-query' \
+          --bind='enter:accept' \
           --bind='esc:abort' \
           --no-info \
           --no-sort \
@@ -92,7 +92,7 @@ _do_rename() {
           --border=rounded \
           --prompt="  rename slug: " \
           --color='border:238,prompt:blue' \
-    | tail -1) || return 0
+    | head -1) || return 0
   new_slug=$(printf '%s' "${new_slug:-}" | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
   [[ -z "$new_slug" || "$new_slug" == "$old_slug" ]] && return
 

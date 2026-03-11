@@ -207,7 +207,7 @@ _fzf_prompt() {
   printf '%s' "$default" \
     | fzf --print-query \
           --query="$default" \
-          --bind='enter:accept-query' \
+          --bind='enter:accept' \
           --bind='esc:abort' \
           --no-info \
           --no-sort \
@@ -215,7 +215,7 @@ _fzf_prompt() {
           --border=rounded \
           --prompt="  ${label}: " \
           --color='border:238,prompt:blue' \
-    | tail -1
+    | head -1
 }
 
 _prompt_new_session() {
@@ -240,14 +240,14 @@ _prompt_new_session() {
   _repo=$(find "$HOME" -maxdepth 5 -type d 2>/dev/null \
     | fzf --print-query \
           --query="$default_repo" \
-          --bind='enter:accept-query' \
+          --bind='enter:accept' \
           --bind='esc:abort' \
           --no-sort \
           --height=40% \
           --border=rounded \
           --prompt="  repo path: " \
           --color='border:238,prompt:blue' \
-    | tail -1) || { echo "aid: cancelled" >&2; exit 1; }
+    | head -1) || { echo "aid: cancelled" >&2; exit 1; }
   _repo="${_repo:-$default_repo}"
 
   # Expand ~ manually in case the user typed it.

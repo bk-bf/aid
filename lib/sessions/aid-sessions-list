@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# aid-sessions-list — emit the fzf input list for aid-sessions.
+#
+# Layout:
+#   aid@my-project  [live]  /path/to/repo        ← session header
+#     > Conv title                   3m ago       ← active opencode conversation
+#       Another conversation        14m ago
+#   aid@other-proj  [dead]                        ← dead session header
+#
+# Each output line is tab-delimited:
+#   DISPLAY_TEXT \t TAG
+#
+# TAG values:
+#   [session:aid@<name>]         — session header (selectable: switch to it)
+#   [dead:aid@<name>]            — dead session header
+#   [conv:<session_id>:<tmux_session>]  — opencode conversation
+#   [noconv:<tmux_session>]      — placeholder when no conversations found
+#
+# Collapse state: AID_SESSIONS_COLLAPSE file, one session name per line.
+# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE
+
+set -euo pipefail
+
+: "${AID_DATA:?}"
+: "${AID_DIR:?}"
+
+# shellcheck source=lib/sessions/aid-meta
+source "$AID_DIR/lib/sessions/aid-meta"
+
+_collapse_file="${AID_SESSIONS_COLLAPSE:-}"
+_is_collapsed() {
+  [[ -n "$_collapse_file" && -f "$_collapse_file" ]] || return 1
+  grep -qxF "$1" "$_collapse_file" 2>/dev/null
+}
+
+_relative_time() {
+  local ts="$1"
+  [[ -z "$ts" || "$ts" == "null" ]] && printf 'unknown' && return
+  local now epoch diff
+  now=$(date +%s)
+  epoch=$(date -d "$ts" +%s 2>/dev/null \
+    || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null \
+    || printf '0')
+  diff=$(( now - epoch ))
+  if   (( diff < 60    )); then printf '%ds ago'  "$diff"
+  elif (( diff < 3600  )); then printf '%dm ago'  "$(( diff / 60 ))"
+  elif (( diff < 86400 )); then printf '%dh ago'  "$(( diff / 3600 ))"
+  else                          printf '%dd ago'  "$(( diff / 86400 ))"
+  fi
+}
+
+# _opencode_conversations <repo_path> <orc_port>
+# Print tab-separated lines: id \t title \t updated_epoch_ms
+# Queries the opencode HTTP API: GET /session on the session's port.
+_opencode_conversations() {
+  local repo_path="$1" port="${2:-0}"
+  command -v jq &>/dev/null || return 0
+  [[ "$port" -gt 0 ]] 2>/dev/null || return 0
+
+  local json
+  json=$(curl -sf --max-time 2 \
+    -H 'Accept: application/json' \
+    "http://127.0.0.1:${port}/session" 2>/dev/null || true)
+  [[ -z "$json" || "$json" == "[]" || "$json" == "null" ]] && return 0
+
+  # Filter by directory == repo_path, sort by time.updated desc, emit tsv.
+  printf '%s\n' "$json" | jq -r \
+    --arg dir "$repo_path" \
+    '[.[] | select(.directory == $dir)] | sort_by(.time.updated) | reverse
+     | .[] | [.id, (.title // "(untitled)"), (.time.updated | tostring)] | @tsv' \
+    2>/dev/null || true
+}
+
+# ── Build list ────────────────────────────────────────────────────────────────
+
+# Live orchestrator sessions only (tagged @aid_mode=orchestrator at spawn time).
+# This excludes plain aid sessions that share the same tmux server.
+# Note: @aid_mode is the last field so we cannot rely on a trailing space —
+# use awk field comparison instead of grep to avoid that trap.
+mapfile -t _live < <(
+  tmux -L aid list-sessions \
+    -F "#{session_last_attached} #{@aid_mode} #{session_name}" 2>/dev/null \
+    | awk '$2 == "orchestrator" {print $3}' \
+    | sort \
+    || true
+)
+
+# Dead sessions from metadata not in tmux.
+mapfile -t _dead < <(
+  _meta_all_sessions | while IFS= read -r s; do
+    printf '%s\n' "${_live[@]:-}" | grep -qxF "$s" || printf '%s\n' "$s"
+  done 2>/dev/null || true
+)
+
+# Currently active session in this client (for marking).
+_current=$(tmux -L aid display-message -p "#{session_name}" 2>/dev/null || true)
+
+# ── Emit live sessions ────────────────────────────────────────────────────────
+for _session in "${_live[@]}"; do
+  [[ -z "$_session" ]] && continue
+  _name="${_session#aid@}"
+  _repo=$(_meta_get "$_session" "repo_path")
+  _branch=$(_meta_get "$_session" "branch")
+
+  # Active session marker.
+  _marker='  '
+  [[ "$_session" == "$_current" ]] && _marker='▶ '
+
+  # Collapse toggle.
+  _collapsed=0
+  _is_collapsed "$_session" && _collapsed=1
+
+  if (( _collapsed )); then
+    printf '%s▶ aid@%s  \033[2m[live]\033[0m%s\t[session:%s]\n' \
+      "$_marker" "$_name" \
+      "${_repo:+  ${_repo}${_branch:+  (${_branch})}}" \
+      "$_session"
+    continue
+  fi
+
+  printf '%s\033[1maid@%s\033[0m  \033[32m[live]\033[0m%s\t[session:%s]\n' \
+    "$_marker" "$_name" \
+    "${_repo:+  \033[2m${_repo}${_branch:+  (${_branch})}\033[0m}" \
+    "$_session"
+
+  # Conversations under this session.
+  if [[ -n "$_repo" ]]; then
+    # Get the opencode HTTP port for this session (stored in session env).
+    _orc_port=$(tmux -L aid show-environment -t "$_session" AID_ORC_PORT 2>/dev/null \
+      | cut -d= -f2- || true)
+
+    # Get currently loaded conversation ID (best-effort).
+    _active_conv_id=$(tmux -L aid show-environment -t "$_session" AID_ORC_ACTIVE_CONV 2>/dev/null \
+      | cut -d= -f2- || true)
+
+    local_done=0
+    while IFS=$'\t' read -r _cid _ctitle _cepoch_ms; do
+      [[ -z "$_cid" ]] && continue
+      local_done=1
+      _age='unknown'
+      if [[ -n "$_cepoch_ms" && "$_cepoch_ms" != "null" && "$_cepoch_ms" != "0" ]]; then
+        _now=$(date +%s)
+        # API returns milliseconds; convert to seconds.
+        _diff=$(( _now - _cepoch_ms / 1000 ))
+        if   (( _diff < 60    )); then _age="${_diff}s ago"
+        elif (( _diff < 3600  )); then _age="$(( _diff / 60 ))m ago"
+        elif (( _diff < 86400 )); then _age="$(( _diff / 3600 ))h ago"
+        else                          _age="$(( _diff / 86400 ))d ago"
+        fi
+      fi
+
+      _conv_marker='  '
+      [[ "$_cid" == "$_active_conv_id" ]] && _conv_marker='▶ '
+
+      # Truncate title to 48 chars.
+      _short=$(printf '%.48s' "$_ctitle")
+      [[ "${#_ctitle}" -gt 48 ]] && _short="${_short}…"
+
+      printf '    %s%-50s \033[2m%s\033[0m\t[conv:%s:%s]\n' \
+        "$_conv_marker" "$_short" "$_age" "$_cid" "$_session"
+    done < <(_opencode_conversations "$_repo" "${_orc_port:-0}")
+
+    if [[ "$local_done" -eq 0 ]]; then
+      printf '    \033[2m(no conversations yet)\033[0m\t[noconv:%s]\n' "$_session"
+    fi
+  else
+    printf '    \033[2m(no repo metadata)\033[0m\t[noconv:%s]\n' "$_session"
+  fi
+done
+
+# ── Emit dead sessions ────────────────────────────────────────────────────────
+for _session in "${_dead[@]}"; do
+  [[ -z "$_session" ]] && continue
+  _name="${_session#aid@}"
+  _repo=$(_meta_get "$_session" "repo_path")
+  _branch=$(_meta_get "$_session" "branch")
+  _last=$(_meta_get "$_session" "last_active")
+  _age=$(_relative_time "$_last")
+
+  printf '  \033[2maid@%s  [dead]  %s%s\033[0m\t[dead:%s]\n' \
+    "$_name" "$_age" \
+    "${_repo:+  ${_repo}${_branch:+  (${_branch})}}" \
+    "$_session"
+done

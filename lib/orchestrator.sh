@@ -7,10 +7,10 @@
 #   [navigator ~25%] | [opencode ~50%] | [lazygit ~25%]
 #   [tab: nvim — full width]
 #
-# The navigator (left pane) runs aid-nav, a bubbletea TUI that shows all
-# aid@* orchestrator sessions and their opencode conversations.  Selecting a
-# conversation calls POST /tui/select-session on the session's opencode port
-# so the conversation switches without losing any history (opencode DB persists).
+# The navigator (left pane) runs aid-sessions (fzf-based) which shows all
+# aid@* orchestrator sessions and their opencode conversations. Selecting a
+# conversation calls POST /tui/select-session on the session's opencode HTTP
+# API port so the conversation switches without losing any history.
 #
 # On first launch with no existing sessions: auto-create from cwd basename.
 # On subsequent launches: auto-attach to the most recently used aid@* session.
@@ -162,9 +162,9 @@ spawn_orc_session() {
   tmux -L aid respawn-pane -k -t "$orc_pane" \
     "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
 
-  # Start the navigator in the left pane (aid-nav: bubbletea TUI).
+  # Start the navigator in the left pane (aid-sessions: fzf-based navigator).
   tmux -L aid respawn-pane -k -t "$nav_pane" \
-    "AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-nav")"
+    "AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions")"
 
   # ── Window 1: nvim ──
   tmux -L aid new-window -t "$session" -n "nvim" -c "$repo_path"
@@ -258,9 +258,10 @@ fi
 
 # Normal launch: find existing orchestrator sessions (tagged @aid_mode=orchestrator).
 # This explicitly excludes plain aid sessions sharing the same tmux server.
+# Use awk field match (not grep) — @aid_mode is last field, no trailing space.
 _existing=$(tmux -L aid list-sessions \
   -F "#{session_last_attached} #{@aid_mode} #{session_name}" 2>/dev/null \
-  | grep ' orchestrator ' \
+  | awk '$2 == "orchestrator" {print $1, $3}' \
   | sort -rn \
   | awk '{print $NF}' \
   || true)

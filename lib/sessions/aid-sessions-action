@@ -81,8 +81,18 @@ _do_rename() {
   old_slug=$(printf '%s' "$session" | cut -d'/' -f2)
   project=$(printf '%s' "$session"  | cut -d'@' -f2 | cut -d'/' -f1)
 
-  printf 'rename "%s" → new slug: ' "$old_slug"
-  read -r new_slug
+  new_slug=$(printf '%s' "$old_slug" \
+    | fzf --print-query \
+          --query="$old_slug" \
+          --bind='enter:accept-query' \
+          --bind='esc:abort' \
+          --no-info \
+          --no-sort \
+          --height=4 \
+          --border=rounded \
+          --prompt="  rename slug: " \
+          --color='border:238,prompt:blue' \
+    | tail -1) || return 0
   new_slug=$(printf '%s' "${new_slug:-}" | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
   [[ -z "$new_slug" || "$new_slug" == "$old_slug" ]] && return
 
@@ -110,9 +120,16 @@ _do_delete() {
     *)         session="$_raw_tag" ;;
   esac
 
-  printf 'delete "%s"? [y/N] ' "$session"
-  local confirm; read -r confirm
-  [[ "$confirm" == [yY] ]] || return
+  local confirm
+  confirm=$(printf 'no\nyes' \
+    | fzf --no-info \
+          --no-sort \
+          --height=5 \
+          --border=rounded \
+          --prompt="  delete ${session}? " \
+          --color='border:238,prompt:yellow' \
+    2>/dev/null || true)
+  [[ "$confirm" == "yes" ]] || return
 
   tmux -L aid kill-session -t "$session" 2>/dev/null || true
   _meta_remove "$session"

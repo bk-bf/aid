@@ -195,6 +195,28 @@ _attach_or_switch() {
 # ── Prompt for first session ──────────────────────────────────────────────────
 # If there are no existing aid@<project>/<slug> sessions (other than aid@dashboard), prompt the
 # user to create the first one, defaulting to the current directory.
+#
+# All input is collected via fzf --print-query so this works inside tmux
+# display-popup / execute(...) contexts that have no controlling tty.
+#
+# _fzf_prompt <label> <default>
+# Single-field fzf prompt: pre-fills <default> as the query; Enter confirms.
+# Prints the entered value to stdout.
+_fzf_prompt() {
+  local label="$1" default="$2"
+  printf '%s' "$default" \
+    | fzf --print-query \
+          --query="$default" \
+          --bind='enter:accept-query' \
+          --bind='esc:abort' \
+          --no-info \
+          --no-sort \
+          --height=4 \
+          --border=rounded \
+          --prompt="  ${label}: " \
+          --color='border:238,prompt:blue' \
+    | tail -1
+}
 
 _prompt_new_session() {
   local default_project default_slug default_repo
@@ -206,22 +228,29 @@ _prompt_new_session() {
     | sed 's|.*/||' | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
   [[ -z "$default_slug" ]] && default_slug="main"
 
-  echo ""
-  echo "aid orchestrator — new session"
-  echo ""
-  printf "  project [%s]: " "$default_project"
-  read -r _project
-  _project="${_project:-$default_project}"
+  _project=$(_fzf_prompt "project" "$default_project") || { echo "aid: cancelled" >&2; exit 1; }
+  _project=$(printf '%s' "${_project:-$default_project}" | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
+  [[ -z "$_project" ]] && _project="$default_project"
 
-  printf "  session [%s]: " "$default_slug"
-  read -r _slug
-  _slug="${_slug:-$default_slug}"
+  _slug=$(_fzf_prompt "session slug" "$default_slug") || { echo "aid: cancelled" >&2; exit 1; }
+  _slug=$(printf '%s' "${_slug:-$default_slug}" | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')
+  [[ -z "$_slug" ]] && _slug="$default_slug"
 
-  printf "  repo path [%s]: " "$default_repo"
-  read -r _repo
+  # Repo path: fzf over find output so the user can also navigate with Tab.
+  _repo=$(find "$HOME" -maxdepth 5 -type d 2>/dev/null \
+    | fzf --print-query \
+          --query="$default_repo" \
+          --bind='enter:accept-query' \
+          --bind='esc:abort' \
+          --no-sort \
+          --height=40% \
+          --border=rounded \
+          --prompt="  repo path: " \
+          --color='border:238,prompt:blue' \
+    | tail -1) || { echo "aid: cancelled" >&2; exit 1; }
   _repo="${_repo:-$default_repo}"
 
-  # Expand ~ manually since read doesn't do shell expansion.
+  # Expand ~ manually in case the user typed it.
   _repo="${_repo/#\~/$HOME}"
 
   if [[ ! -d "$_repo" ]]; then

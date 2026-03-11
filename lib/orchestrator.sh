@@ -70,10 +70,21 @@ _ensure_server() {
 # ── Session helpers ───────────────────────────────────────────────────────────
 
 # _attach_or_switch <session>
+# Switches the tmux client to <session>.
+#
+# When called from within a pane subprocess (e.g. aid-sessions 'n' key),
+# the plain `switch-client -t` targets whichever client tmux deems "current",
+# which may be wrong.  AID_CALLER_CLIENT (exported by aid-sessions) contains
+# the tty of the actual terminal the user is sitting at, so we use -c when
+# available.
 _attach_or_switch() {
   local target="$1"
   if [[ -n "${TMUX:-}" ]]; then
-    tmux -L aid switch-client -t "$target"
+    if [[ -n "${AID_CALLER_CLIENT:-}" ]]; then
+      tmux -L aid switch-client -c "$AID_CALLER_CLIENT" -t "$target"
+    else
+      tmux -L aid switch-client -t "$target"
+    fi
   else
     tmux -L aid attach -t "$target"
   fi

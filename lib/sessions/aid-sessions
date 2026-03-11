@@ -40,7 +40,11 @@ trap 'rm -f "$AID_SESSIONS_COLLAPSE"' EXIT
 _switch() {
   local session="$1"
   if [[ -n "${TMUX:-}" ]]; then
-    tmux -L aid switch-client -t "$session"
+    if [[ -n "${AID_CALLER_CLIENT:-}" ]]; then
+      tmux -L aid switch-client -c "$AID_CALLER_CLIENT" -t "$session"
+    else
+      tmux -L aid switch-client -t "$session"
+    fi
   else
     tmux -L aid attach -t "$session"
   fi
@@ -55,11 +59,16 @@ if ! command -v fzf &>/dev/null; then
   exit 1
 fi
 
+# AID_CALLER_CLIENT — tty of the terminal that opened this navigator.
+# Inherited from orchestrator.sh when launched via display-popup; derived from
+# TMUX_PANE when launched directly.  Kept stable across all sub-popup re-execs.
+if [[ -z "${AID_CALLER_CLIENT:-}" && -n "${TMUX_PANE:-}" ]]; then
+  AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+fi
+export AID_CALLER_CLIENT
+
 # Pre-build the action and reload command strings (expanded once, safe paths).
-# AID_CALLER_PANE is the pane that launched the navigator (threaded in from
-# orchestrator.sh so sub-popups open on the same client, not an arbitrary one).
-_caller_pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
-_act="AID_CALLER_PANE=$(printf '%q' "$_caller_pane") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
+_act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
 _lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
 
 _initial_list=$("$AID_DIR/lib/sessions/aid-sessions-list" 2>/dev/null || true)
@@ -88,7 +97,7 @@ _selected=$(printf '%s\n' "$_initial_list" | fzf \
   --bind "z:execute-silent($_act toggle-collapse {})+reload($_lst 2>/dev/null)" \
   --bind "r:execute($_act rename {})+reload($_lst 2>/dev/null)" \
   --bind "d:execute($_act delete {})+reload($_lst 2>/dev/null)" \
-  --bind "n:execute-silent(AID_CALLER_PANE=$(printf '%q' "$_caller_pane") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
+  --bind "n:execute-silent(AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
   --bind "q:abort" \
   --bind "esc:abort" \
   2>/dev/null \

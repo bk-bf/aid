@@ -21,6 +21,16 @@ source "$AID_DIR/lib/sessions/aid-meta"
 
 dbg() { [[ "${AID_DEBUG:-0}" -eq 1 ]] && echo "[orc:debug] $*" >&2 || true; }
 
+# AID_CALLER_CLIENT — the tty of the terminal that launched this orchestrator
+# invocation (e.g. /dev/pts/3).  Resolved once here from $TMUX_PANE so that
+# every display-popup -c and switch-client -c targets the exact right terminal
+# no matter how many re-execs or sub-popups occur.
+# If already set (re-exec inside a popup), keep the inherited value.
+if [[ -z "${AID_CALLER_CLIENT:-}" && -n "${TMUX_PANE:-}" ]]; then
+  AID_CALLER_CLIENT=$(tmux -L aid display-message -t "$TMUX_PANE" -p "#{client_tty}" 2>/dev/null || true)
+fi
+export AID_CALLER_CLIENT
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 # Ensure the aid tmux server is running with the aid config.
@@ -181,25 +191,18 @@ _write_session_metadata() {
 
 # _attach_or_switch <session>
 # Switch the calling client to <session>.
-# AID_CALLER_PANE (set when re-exec'd inside a popup) is used to resolve the
-# exact client tty so we never accidentally switch a different terminal.
-# Falls back to the current $TMUX_PANE, then to a plain attach.
+# Uses AID_CALLER_CLIENT (client tty, e.g. /dev/pts/3) when set so we always
+# switch the exact terminal that invoked the orchestrator, never an arbitrary one.
 _attach_or_switch() {
   local _target_session="$1"
-  local _pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
   local _sock
   _sock=$(printf '%s' "${TMUX:-}" | cut -d',' -f1)
   if [[ -n "${TMUX:-}" && "$(basename "$_sock")" == "aid" ]]; then
-    if [[ -n "$_pane" ]]; then
-      # Resolve the client tty from the caller pane, then switch that client.
-      local _client_tty
-      _client_tty=$(tmux -L aid display-message -t "$_pane" -p "#{client_tty}" 2>/dev/null || true)
-      if [[ -n "$_client_tty" ]]; then
-        tmux -L aid switch-client -c "$_client_tty" -t "$_target_session"
-        return
-      fi
+    if [[ -n "${AID_CALLER_CLIENT:-}" ]]; then
+      tmux -L aid switch-client -c "$AID_CALLER_CLIENT" -t "$_target_session"
+    else
+      tmux -L aid switch-client -t "$_target_session"
     fi
-    tmux -L aid switch-client -t "$_target_session"
   else
     tmux -L aid attach -t "$_target_session"
   fi
@@ -233,14 +236,12 @@ _fzf_prompt() {
 
 _prompt_new_session() {
   # If we're not already inside the popup, open one and re-exec --new inside it.
-  # Use -t "$TMUX_PANE" (or AID_CALLER_PANE if already re-exec'd) so the popup
-  # appears on the correct client, not on an arbitrary one.
+  # Use -c "$AID_CALLER_CLIENT" so the popup appears on the correct client.
   if [[ "${AID_IN_NEW_POPUP:-0}" -ne 1 ]]; then
-    local _pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
-    local _t_flag=()
-    [[ -n "$_pane" ]] && _t_flag=(-t "$_pane")
-    tmux -L aid display-popup -E -w 72 -h 20 "${_t_flag[@]}" \
-      "AID_IN_NEW_POPUP=1 AID_CALLER_PANE=$(printf '%q' "${_pane:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new"
+    local _c_flag=()
+    [[ -n "${AID_CALLER_CLIENT:-}" ]] && _c_flag=(-c "$AID_CALLER_CLIENT")
+    tmux -L aid display-popup -E -w 72 -h 20 "${_c_flag[@]}" \
+      "AID_IN_NEW_POPUP=1 AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new"
     return
   fi
 
@@ -329,13 +330,11 @@ else
   fi
   if [[ "$_in_aid_server" -eq 1 ]]; then
     # Already inside the aid server: open the navigator as a popup overlay.
-    # Pass the caller pane so the navigator (and any sub-popups it spawns)
-    # target the correct client throughout the whole interaction chain.
-    _nav_pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
-    _nav_t=()
-    [[ -n "$_nav_pane" ]] && _nav_t=(-t "$_nav_pane")
-    tmux -L aid display-popup -E -w 70% -h 60% "${_nav_t[@]}" \
-      "AID_CALLER_PANE=$(printf '%q' "${_nav_pane:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
+    # Use -c to target the exact client that invoked us.
+    _nav_c=()
+    [[ -n "${AID_CALLER_CLIENT:-}" ]] && _nav_c=(-c "$AID_CALLER_CLIENT")
+    tmux -L aid display-popup -E -w 70% -h 60% "${_nav_c[@]}" \
+      "AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR")/lib/sessions/aid-sessions"
   else
     # Outside the aid server (plain terminal or a different tmux server): run
     # the session navigator directly so the user can pick or create a session.

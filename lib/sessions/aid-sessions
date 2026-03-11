@@ -211,17 +211,11 @@ _dbglog=$(printf '%q' "${AID_DEBUG_LOG:-}")
 # The helper reads FZF_POS / FZF_MATCH_COUNT from its env (set by fzf) and
 # emits a reload-sync+pos action string to stdout.
 _rld="AID_DEBUG_LOG=${_dbglog} AID_SESSIONS_LST=$(printf '%q' "${_lst}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
-# start: bind — reload without a position (cursor starts at top on initial load).
-# Pre-computed to keep shellcheck happy (it can't parse fzf action syntax).
-_bind_start="start:transform:
-  _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-  [[ -n ${_dbglog} ]] && printf '%s INIT  start event fired -> reload (no pos yet)\n' \"\$_ms\" >> ${_dbglog}
-  echo 'reload(${_lst} 2>/dev/null || true)'
-"
 
 _dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
 
 # Background auto-refresh: every 5 s send a reload command to fzf via --listen.
+# Spawned ONCE here — never re-spawned across loop iterations (Bug 2 fix).
 # Uses transform so fzf sets FZF_POS in the shell env; aid-sessions-reload reads
 # it and emits reload-sync+pos, preserving the cursor across auto-refreshes.
 (
@@ -250,120 +244,140 @@ _dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
 _ticker_pid=$!
 trap 'kill "$_ticker_pid" 2>/dev/null || true; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 
-# fzf main loop.
-# - no --disabled, no search binds: search/filter is fully removed
-# - change:ignore swallows typed characters so the list is never filtered
-# - start:reload → immediate accurate list on open
-# - ctrl-r:reload-sync+pos → manual refresh, cursor preserved
-# - n/r/d → new / rename / delete (via --expect)
-# - q → quit
-_output=$(printf '' | fzf \
-  --listen="${_fzf_port}" \
-  --border=rounded \
-  --border-label=" aid sessions " \
-  --border-label-pos=3 \
-  --header=$'  \033[2menter\033[0m select  \033[2mn\033[0m new  \033[2mr\033[0m rename  \033[2md\033[0m delete  \033[2mctrl-r\033[0m refresh  \033[2mq\033[0m quit' \
-  --layout=reverse-list \
-  --no-sort \
-  --no-input \
-  --ansi \
-  --delimiter=$'\t' \
-  --with-nth=1 \
-  --accept-nth='2' \
-  --expect='n,r,d' \
-  --preview="$_act preview {}" \
-  --preview-window='right:45%:wrap:border-left:hidden' \
-  --preview-label=' info ' \
-  --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
-  --bind "$_bind_start" \
-  --bind "ctrl-r:transform:${_rld} ctrl-r" \
-  --bind "focus:execute-silent:
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
-  " \
-  --bind "load:execute-silent:
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s LOAD  list ready FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-  " \
-  --bind "up:execute-silent(
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s KEY   up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-  )+up" \
-  --bind "down:execute-silent(
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s KEY   down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-  )+down" \
-  --bind "page-up:execute-silent(
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s KEY   page-up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-  )+page-up" \
-  --bind "page-down:execute-silent(
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s KEY   page-down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-  )+page-down" \
-  --bind "enter:execute-silent(
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s KEY   enter FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-  )+accept" \
-  --bind "esc:abort" \
-  --bind "q:abort" \
-  2>/dev/null \
-  || true)
+# ── fzf loop ──────────────────────────────────────────────────────────────────
+# Instead of exec-ing back into aid-sessions on every action (which orphans the
+# ticker above), we loop here.  fzf is restarted inside this process; the ticker
+# keeps running against the same port.
+#
+# _start_pos: cursor row to restore when fzf reopens after a rename/delete/etc.
+# Defaults to 1; set to the last known FZF_POS before fzf exits so the user
+# lands near where they were (Bug 4 fix).
+_start_pos=1
 
-_key=$(printf '%s\n' "$_output" | head -1)
-_tag=$(printf '%s\n' "$_output" | tail -n +2 | tr -d '[]')
+while true; do
+  # start: bind — reload list and jump to $_start_pos.
+  # Pre-computed to keep shellcheck happy (it can't parse fzf action syntax).
+  _bind_start="start:transform:
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s INIT  start event fired -> reload+pos(${_start_pos})\n' \"\$_ms\" >> ${_dbglog}
+    echo 'reload(${_lst} 2>/dev/null || true)+pos(${_start_pos})'
+  "
 
-_dbg KEY "fzf exited key='${_key:-enter}' tag='${_tag:-}'"
+  _output=$(printf '' | fzf \
+    --listen="${_fzf_port}" \
+    --border=rounded \
+    --border-label=" aid sessions " \
+    --border-label-pos=3 \
+    --header=$'  \033[2menter\033[0m select  \033[2mn\033[0m new  \033[2mr\033[0m rename  \033[2md\033[0m delete  \033[2mctrl-r\033[0m refresh  \033[2mq\033[0m quit' \
+    --layout=reverse-list \
+    --no-sort \
+    --no-input \
+    --ansi \
+    --delimiter=$'\t' \
+    --with-nth=1 \
+    --accept-nth='2' \
+    --expect='n,r,d' \
+    --preview="$_act preview {}" \
+    --preview-window='right:45%:wrap:border-left:hidden' \
+    --preview-label=' info ' \
+    --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
+    --bind "$_bind_start" \
+    --bind "ctrl-r:transform:${_rld} ctrl-r" \
+    --bind "focus:execute-silent:
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
+    " \
+    --bind "load:execute-silent:
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s LOAD  list ready FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
+    " \
+    --bind "up:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s KEY   up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+    )+up" \
+    --bind "down:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s KEY   down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+    )+down" \
+    --bind "page-up:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s KEY   page-up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+    )+page-up" \
+    --bind "page-down:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s KEY   page-down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+    )+page-down" \
+    --bind "enter:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s KEY   enter FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+    )+accept" \
+    --bind "esc:abort" \
+    --bind "q:abort" \
+    2>/dev/null \
+    || true)
 
-case "$_key" in
-  n)
-    exec "$AID_DIR/lib/orchestrator.sh" --new
-    ;;
-  r)
-    _do_rename "$_tag"
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-  d)
-    _do_delete "$_tag"
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-esac
+  _key=$(printf '%s\n' "$_output" | head -1)
+  _tag=$(printf '%s\n' "$_output" | tail -n +2 | tr -d '[]')
 
-# Enter: dispatch on tag type.
-case "${_tag:-}" in
-  ""|"(no sessions yet)"|sep)
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-  session:*)
-    _target="${_tag#session:}"
-    _switch_to_session "$_target"
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-  dead:*)
-    _dead_session="${_tag#dead:}"
-    _repo=$(_meta_get "$_dead_session" "repo_path")
-    _name="${_dead_session#aid@}"
-    if [[ -d "${_repo:-}" ]]; then
-      exec "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo"
-    else
-      echo "aid-sessions: repo '${_repo}' no longer exists for $_dead_session" >&2
-      sleep 2
-      exec "$AID_DIR/lib/sessions/aid-sessions"
-    fi
-    ;;
-  conv:*)
-    # Format: conv:<session_id>:<tmux_session>
-    _rest="${_tag#conv:}"
-    _conv_id="${_rest%%:*}"
-    _tmux_session="${_rest#*:}"
-    _load_conversation "$_conv_id" "$_tmux_session"
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-  noconv:*)
-    # No conversations — just re-open navigator.
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-  *)
-    exec "$AID_DIR/lib/sessions/aid-sessions"
-    ;;
-esac
+  _dbg KEY "fzf exited key='${_key:-enter}' tag='${_tag:-}' pos=${_start_pos}"
+
+  # Default: reopen at row 1 unless overridden below.
+  _start_pos=1
+
+  case "$_key" in
+    n)
+      exec "$AID_DIR/lib/orchestrator.sh" --new
+      ;;
+    r)
+      _do_rename "$_tag"
+      # Stay near the renamed item — it will have shifted by at most one row.
+      # We don't know the exact new position, so keep the current one as a hint.
+      _start_pos=1
+      continue
+      ;;
+    d)
+      _do_delete "$_tag"
+      # After a delete the list shrinks; stay at the same row (clamped by fzf).
+      _start_pos=1
+      continue
+      ;;
+  esac
+
+  # Enter: dispatch on tag type.
+  case "${_tag:-}" in
+    ""|"(no sessions yet)"|sep)
+      continue
+      ;;
+    session:*)
+      _target="${_tag#session:}"
+      _switch_to_session "$_target"
+      continue
+      ;;
+    dead:*)
+      _dead_session="${_tag#dead:}"
+      _repo=$(_meta_get "$_dead_session" "repo_path")
+      _name="${_dead_session#aid@}"
+      if [[ -d "${_repo:-}" ]]; then
+        exec "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo"
+      else
+        echo "aid-sessions: repo '${_repo}' no longer exists for $_dead_session" >&2
+        sleep 2
+        continue
+      fi
+      ;;
+    conv:*)
+      # Format: conv:<session_id>:<tmux_session>
+      _rest="${_tag#conv:}"
+      _conv_id="${_rest%%:*}"
+      _tmux_session="${_rest#*:}"
+      _load_conversation "$_conv_id" "$_tmux_session"
+      continue
+      ;;
+    noconv:*)
+      continue
+      ;;
+    *)
+      continue
+      ;;
+  esac
+done

@@ -212,7 +212,7 @@ _dbglog=$(printf '%q' "${AID_DEBUG_LOG:-}")
 # emits a reload-sync+pos action string to stdout.
 _rld="AID_DEBUG_LOG=${_dbglog} AID_SESSIONS_LST=$(printf '%q' "${_lst}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
 
-_dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
+_dbg INIT "vars ready: act/lst/rld/dbglog set"
 
 # Background auto-refresh: every 5 s send a reload command to fzf via --listen.
 # Spawned ONCE here — never re-spawned across loop iterations (Bug 2 fix).
@@ -220,6 +220,12 @@ _dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
 # it and emits reload-sync+pos, preserving the cursor across auto-refreshes.
 (
   # Give fzf a moment to start and bind to the port.
+  # Log when the ticker wakes up so the timeline is visible in the debug log.
+  if [[ -n "${AID_DEBUG_LOG:-}" ]]; then
+    _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+    printf '%s TICK  ticker sleeping 2s before first attempt (port=%s)\n' \
+      "$_ms" "${_fzf_port}" >> "${AID_DEBUG_LOG}"
+  fi
   sleep 2
   _tick=0
   while true; do
@@ -255,15 +261,16 @@ trap 'kill "$_ticker_pid" 2>/dev/null || true; printf "\033[?1000l\033[?1002l\03
 _start_pos=1
 
 while true; do
-  # start: bind — reload list and jump to $_start_pos.
-  # Pre-computed to keep shellcheck happy (it can't parse fzf action syntax).
-  _bind_start="start:transform:
-    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s INIT  start event fired -> reload-sync+pos(${_start_pos})\n' \"\$_ms\" >> ${_dbglog}
-    echo 'reload-sync(${_lst} 2>/dev/null || true)+pos(${_start_pos})'
-  "
+  # Pre-populate fzf stdin with the current list so there is no blank flash on
+  # open (Bug 5 fix).  We run the list command here in the shell, pipe it
+  # directly to fzf, and skip the start:reload-sync approach entirely.
+  # The ticker and ctrl-r still use reload-sync for subsequent updates.
+  _dbg STDIN "running list command before fzf open (start_pos=${_start_pos})"
+  _initial_list=$(eval "$_lst" 2>/dev/null || true)
+  _initial_lines=$(printf '%s' "$_initial_list" | wc -l)
+  _dbg STDIN "list ready: ${_initial_lines} lines"
 
-  _output=$(printf '' | fzf \
+  _output=$(printf '%s\n' "$_initial_list" | fzf \
     --listen="${_fzf_port}" \
     --border=rounded \
     --border-label=" aid sessions " \
@@ -281,7 +288,7 @@ while true; do
     --preview-window='right:45%:wrap:border-left:hidden' \
     --preview-label=' info ' \
     --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
-    --bind "$_bind_start" \
+    --bind "start:pos(${_start_pos})" \
     --bind "ctrl-r:transform:${_rld} ctrl-r" \
     --bind "focus:execute-silent:
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")

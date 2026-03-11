@@ -131,37 +131,39 @@ spawn_orc_session() {
   tmux -L aid set-environment -t "$session" AID_ORC_REPO      "$repo_path"
   tmux -L aid set-environment -t "$session" AID_ORC_PORT      "$orc_port"
 
-  # ── Build the 2-pane layout (or 3-pane in debug mode) ──
-  # Window 0 starts with a single pane.  We split it into columns:
+  # ── Build the layout ──
+  # Normal mode (2 panes, side by side):
   #   nav (left ~25%) | opencode (right ~75%)
-  # In debug mode a third pane is appended to the right of opencode:
-  #   nav (~20%) | opencode (~55%) | debug (~25%)
+  #
+  # Debug mode (3 panes):
+  #   nav (left ~25%) | opencode (right ~75%)
+  #   ──────────────── debug log (~25% height, full width) ────────────────
   #
   # Initial pane → will become the navigator (left).
   local nav_pane
   nav_pane=$(tmux -L aid list-panes -t "$session" -F "#{pane_id}" | head -1)
 
-  # Split right from nav: this becomes opencode (75% of total, or ~55% in debug mode).
-  local orc_width="75%"
-  [[ "${AID_DEBUG:-0}" -eq 1 ]] && orc_width="55%"
-  local orc_pane
-  orc_pane=$(tmux -L aid split-window -h -t "$nav_pane" -P -F "#{pane_id}" \
-    -l "$orc_width" -- sleep infinity)
-
-  dbg "nav=$nav_pane orc=$orc_pane"
-
-  # In debug mode: split a third pane to the right of opencode for the live log.
-  local dbg_pane=""
-  local debug_log=""
+  # In debug mode: first split the window horizontally (top/bottom) so the
+  # debug pane spans the full width at the bottom.  Then split the top half
+  # vertically into nav | opencode.
+  local dbg_pane="" debug_log=""
   if [[ "${AID_DEBUG:-0}" -eq 1 ]]; then
     debug_log="${AID_DATA}/debug/aid-sessions-${name}.log"
     mkdir -p "$(dirname "$debug_log")"
     : > "$debug_log"
-    dbg_pane=$(tmux -L aid split-window -h -t "$orc_pane" -P -F "#{pane_id}" \
-      -l "31%" -- sleep infinity)
+    # Split bottom 25% off the initial (full-width) pane.
+    dbg_pane=$(tmux -L aid split-window -v -t "$nav_pane" -P -F "#{pane_id}" \
+      -l "25%" -- sleep infinity)
     tmux -L aid set-environment -t "$session" AID_DEBUG_LOG "$debug_log"
     dbg "dbg_pane=$dbg_pane debug_log=$debug_log"
   fi
+
+  # Split the top pane (nav_pane) vertically: right side becomes opencode.
+  local orc_pane
+  orc_pane=$(tmux -L aid split-window -h -t "$nav_pane" -P -F "#{pane_id}" \
+    -l "75%" -- sleep infinity)
+
+  dbg "nav=$nav_pane orc=$orc_pane"
 
   # Store pane IDs in session env so aid-sessions can find the opencode pane.
   tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE "$nav_pane"

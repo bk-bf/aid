@@ -277,16 +277,34 @@ _output=$(printf '' | fzf \
     [[ -n ${_dbglog} ]] && printf '%s KEY   ctrl-r manual refresh FZF_POS=%s -> reload+pos(%s)\n' \"\$_ms\" \"\$_pos\" \"\$_pos\" >> ${_dbglog}
     echo \"reload(${_lst} 2>/dev/null || true)+pos(\${_pos})\"
   " \
-  --bind "focus:transform:
+  --bind "focus:execute-silent:
     _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s POS   focus event FZF_POS=%s FZF_ACTION=%s item={}\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
-    true
+    [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
   " \
-  --bind "load:transform:
+  --bind "load:execute-silent:
     _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-    [[ -n ${_dbglog} ]] && printf '%s RELOAD load event fired FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    true
+    [[ -n ${_dbglog} ]] && printf '%s RELOAD load complete FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
   " \
+  --bind "up:execute-silent(
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s KEY   up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+  )+up" \
+  --bind "down:execute-silent(
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s KEY   down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+  )+down" \
+  --bind "page-up:execute-silent(
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s KEY   page-up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+  )+page-up" \
+  --bind "page-down:execute-silent(
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s KEY   page-down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+  )+page-down" \
+  --bind "enter:execute-silent(
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s KEY   enter FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+  )+accept" \
   --bind "esc:abort" \
   --bind "q:abort" \
   2>/dev/null \

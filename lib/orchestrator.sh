@@ -4,7 +4,7 @@
 # Starts the T3/Codex-style multi-session layout on the aid tmux server.
 #
 # Layout per aid@<name> session (widths approximate):
-#   [navigator ~25%] | [opencode ~50%] | [lazygit ~25%]
+#   [navigator ~25%] | [opencode ~75%]
 #   [tab: nvim — full width]
 #
 # The navigator (left pane) runs aid-sessions (fzf-based) which shows all
@@ -39,21 +39,22 @@ _ensure_server() {
     tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "aid@_bootstrap" \
       -x "$(tput cols)" -y "$(tput lines)"
     tmux -L aid source-file "$AID_DATA/tmux/palette.conf"
-    tmux -L aid set-environment -g XDG_STATE_HOME           "$HOME/.local/state/aid"
-    tmux -L aid set-environment -g XDG_CACHE_HOME           "$HOME/.cache/aid"
+    # Global env vars — only set on a fresh server to avoid clobbering vars
+    # for existing aid sessions on other branches sharing this tmux server.
+    tmux -L aid set-environment -g AID_DIR             "$AID_DIR"
+    tmux -L aid set-environment -g AID_DATA            "$AID_DATA"
+    tmux -L aid set-environment -g AID_CONFIG          "$AID_CONFIG"
+    tmux -L aid set-environment -g XDG_DATA_HOME       "$AID_DATA"
+    tmux -L aid set-environment -g XDG_STATE_HOME      "$HOME/.local/state/aid"
+    tmux -L aid set-environment -g XDG_CACHE_HOME      "$HOME/.cache/aid"
     tmux -L aid set-environment -g TMUX_PLUGIN_MANAGER_PATH "$AID_DATA/tmux/plugins/"
-    tmux -L aid set-environment -g NVIM_APPNAME             "nvim"
+    tmux -L aid set-environment -g NVIM_APPNAME        "nvim"
+    tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
+    tmux -L aid set-environment -g OPENCODE_TUI_CONFIG "$AID_DIR/opencode/tui.json"
     dbg "server started"
   else
     dbg "server already running"
   fi
-  # Always update AID_* in the server so branch installs use correct paths.
-  tmux -L aid set-environment -g AID_DIR             "$AID_DIR"
-  tmux -L aid set-environment -g AID_DATA            "$AID_DATA"
-  tmux -L aid set-environment -g AID_CONFIG          "$AID_CONFIG"
-  tmux -L aid set-environment -g XDG_DATA_HOME       "$AID_DATA"
-  tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
-  tmux -L aid set-environment -g OPENCODE_TUI_CONFIG "$AID_DIR/opencode/tui.json"
 }
 
 # ── Session helpers ───────────────────────────────────────────────────────────
@@ -82,10 +83,9 @@ _most_recent_session() {
 # ── Layout spawner ────────────────────────────────────────────────────────────
 
 # spawn_orc_session <name> <repo_path>
-# Creates a new aid@<name> tmux session with the 3-pane orchestrator layout:
+# Creates a new aid@<name> tmux session with the 2-pane orchestrator layout:
 #   left  (~25%)  aid-sessions navigator (fzf, persistent)
-#   center (~50%) opencode
-#   right  (~25%) lazygit
+#   right (~75%)  opencode
 # Plus a second window "nvim" (full-width nvim + treemux sidebar).
 spawn_orc_session() {
   local name="$1" repo_path="$2"
@@ -129,35 +129,26 @@ spawn_orc_session() {
   tmux -L aid set-environment -t "$session" AID_ORC_REPO      "$repo_path"
   tmux -L aid set-environment -t "$session" AID_ORC_PORT      "$orc_port"
 
-  # ── Build the 3-pane layout ──
-  # Window 0 starts with a single pane.  We split it into three columns:
-  #   nav (left) | opencode (center) | lazygit (right)
+  # ── Build the 2-pane layout ──
+  # Window 0 starts with a single pane.  We split it into two columns:
+  #   nav (left ~25%) | opencode (right ~75%)
   #
-  # Strategy: create panes via split-window, then note their IDs.
   # Initial pane → will become the navigator (left).
   local nav_pane
   nav_pane=$(tmux -L aid list-panes -t "$session" -F "#{pane_id}" | head -1)
 
-  # Split right from nav: this becomes opencode+lazygit combined (75% of total).
-  # Then split that right area: lazygit gets 25% of total = 33% of the 75% area.
-  local orc_pane lazygit_pane
+  # Split right from nav: this becomes opencode (75% of total).
+  local orc_pane
   orc_pane=$(tmux -L aid split-window -h -t "$nav_pane" -P -F "#{pane_id}" \
     -l "75%" -- sleep infinity)
-  lazygit_pane=$(tmux -L aid split-window -h -t "$orc_pane" -P -F "#{pane_id}" \
-    -l "34%" -- sleep infinity)
 
-  dbg "nav=$nav_pane orc=$orc_pane lazygit=$lazygit_pane"
+  dbg "nav=$nav_pane orc=$orc_pane"
 
   # Store pane IDs in session env so aid-sessions can find the opencode pane.
-  tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE      "$nav_pane"
-  tmux -L aid set-environment -t "$session" AID_ORC_ORC_PANE      "$orc_pane"
-  tmux -L aid set-environment -t "$session" AID_ORC_LAZYGIT_PANE  "$lazygit_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE "$nav_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_ORC_PANE "$orc_pane"
 
-  # Start lazygit in the right pane.
-  tmux -L aid respawn-pane -k -t "$lazygit_pane" \
-    "cd $(printf '%q' "$repo_path") && lazygit --use-config-file=$(printf '%q' "$AID_CONFIG/lazygit/config.yml")"
-
-  # Start opencode in the center pane with a fixed HTTP port so the navigator
+  # Start opencode in the right pane with a fixed HTTP port so the navigator
   # can reach the /tui/select-session API without port discovery.
   tmux -L aid respawn-pane -k -t "$orc_pane" \
     "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode --port ${orc_port} $(printf '%q' "$repo_path")"

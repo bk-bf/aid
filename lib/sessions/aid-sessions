@@ -8,8 +8,10 @@
 #   aid@my-project  [live]  /path/to/repo
 #     > Some conversation title       3m ago    ← active conv (▶)
 #       Another conversation         14m ago
+#
 #   aid@other-proj  [live]
 #       A conversation               1h ago
+#
 #   aid@dead-proj   [dead]           2d ago
 #
 # Keys:
@@ -18,7 +20,6 @@
 #   n      — new session (prompts for name + repo)
 #   d      — delete session (with confirmation)
 #   r      — rename session
-#   z      — toggle collapse/expand session group
 #   ctrl-r — manual refresh
 #   q/esc  — quit
 #
@@ -34,9 +35,7 @@ source "$AID_DIR/lib/sessions/aid-meta"
 
 # ── Mouse reset trap ──────────────────────────────────────────────────────────
 # Prevents terminal corruption when fzf exits abnormally.
-export AID_SESSIONS_COLLAPSE
-AID_SESSIONS_COLLAPSE=$(mktemp /tmp/aid-sessions-collapse.XXXXXX)
-trap 'rm -f "$AID_SESSIONS_COLLAPSE"; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
+trap 'printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 
 # ── Caller client resolution ──────────────────────────────────────────────────
 # Used to target display-popup and switch-client to the correct terminal.
@@ -71,23 +70,25 @@ _switch_to_session() {
 
 _load_conversation() {
   local conv_id="$1" tmux_session="$2"
-  # Find the opencode center pane for this session.
-  local orc_pane
-  orc_pane=$(tmux -L aid show-environment -t "$tmux_session" AID_ORC_ORC_PANE 2>/dev/null \
-    | cut -d= -f2- || true)
-  [[ -z "$orc_pane" ]] && return 0
 
-  local repo_path
-  repo_path=$(tmux -L aid show-environment -t "$tmux_session" AID_ORC_REPO 2>/dev/null \
+  # Get the opencode HTTP port for this session.
+  local orc_port
+  orc_port=$(tmux -L aid show-environment -t "$tmux_session" AID_ORC_PORT 2>/dev/null \
     | cut -d= -f2- || true)
-  [[ -z "$repo_path" ]] && return 0
+  [[ -z "$orc_port" || "$orc_port" -le 0 ]] 2>/dev/null && return 0
 
   # Store the active conversation ID in the session env.
   tmux -L aid set-environment -t "$tmux_session" AID_ORC_ACTIVE_CONV "$conv_id"
 
-  # Respawn the opencode pane with the selected session ID.
-  tmux -L aid respawn-pane -k -t "$orc_pane" \
-    "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode -s $(printf '%q' "$conv_id") $(printf '%q' "$repo_path")"
+  # Ask the live opencode TUI to switch to this session via HTTP API.
+  # This does NOT kill or respawn the opencode pane — it sends a signal through
+  # the running process, so the nav pane shell is unaffected.
+  curl -sf --max-time 3 \
+    -X POST \
+    -H 'Content-Type: application/json' \
+    -d "{\"sessionID\":\"${conv_id}\"}" \
+    "http://127.0.0.1:${orc_port}/tui/select-session" \
+    >/dev/null 2>&1 || true
 
   # If we're not already in that tmux session, switch to it.
   local _cur
@@ -167,8 +168,12 @@ if ! command -v fzf &>/dev/null; then
   exit 1
 fi
 
-_act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
-_lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "$AID_SESSIONS_COLLAPSE") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
+# Auto-refresh port: pick a free port for fzf --listen so the background
+# ticker can send reload commands without restarting fzf.
+_fzf_port=$(( 49200 + RANDOM % 1000 ))
+
+_act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
+_lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
 
 # Run list once to check if there are any sessions.
 _initial_list=$("$AID_DIR/lib/sessions/aid-sessions-list" 2>/dev/null || true)
@@ -179,14 +184,31 @@ if [[ -z "$_initial_list" ]]; then
   _initial_list="  (no sessions yet)"
 fi
 
-# fzf main loop — n/r/d exit via --expect; enter selects; z/ctrl-r stay live.
-# Running in a persistent left pane: after each action we re-exec to refresh.
+# Background auto-refresh: every 5 s send a reload command to fzf via --listen.
+(
+  # Give fzf a moment to start and bind to the port.
+  sleep 2
+  while true; do
+    sleep 5
+    curl -sf --max-time 1 \
+      -X POST \
+      "http://127.0.0.1:${_fzf_port}" \
+      -d "reload(${_lst} 2>/dev/null)" \
+      >/dev/null 2>&1 || true
+  done
+) &
+_ticker_pid=$!
+trap 'kill "$_ticker_pid" 2>/dev/null || true; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
+
+# fzf main loop — n/r/d exit via --expect; enter selects; ctrl-r stays live.
 _output=$(printf '%s\n' "$_initial_list" | fzf \
+  --listen="${_fzf_port}" \
   --prompt="  " \
   --border=rounded \
   --border-label=" aid sessions " \
   --border-label-pos=3 \
-  --header=$'  \033[2menter\033[0m select  \033[2mn\033[0m new  \033[2mr\033[0m rename  \033[2md\033[0m delete  \033[2mz\033[0m collapse  \033[2mctrl-r\033[0m refresh  \033[2mq/esc\033[0m quit' \
+  --header=$'  \033[2menter\033[0m select  \033[2mn\033[0m new  \033[2mr\033[0m rename  \033[2md\033[0m delete  \033[2mctrl-r\033[0m refresh  \033[2mq/esc\033[0m quit' \
+  --layout=reverse-list \
   --no-sort \
   --ansi \
   --delimiter=$'\t' \
@@ -198,7 +220,6 @@ _output=$(printf '%s\n' "$_initial_list" | fzf \
   --preview-label=' info ' \
   --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
   --bind "ctrl-r:reload($_lst 2>/dev/null)" \
-  --bind "z:execute-silent($_act toggle-collapse {})+reload($_lst 2>/dev/null)" \
   --bind "q:abort" \
   --bind "esc:abort" \
   2>/dev/null \
@@ -223,7 +244,7 @@ esac
 
 # Enter: dispatch on tag type.
 case "${_tag:-}" in
-  ""|"(no sessions yet)")
+  ""|"(no sessions yet)"|sep)
     exec "$AID_DIR/lib/sessions/aid-sessions"
     ;;
   session:*)

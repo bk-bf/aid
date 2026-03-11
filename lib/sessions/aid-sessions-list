@@ -5,6 +5,7 @@
 #   aid@my-project  [live]  /path/to/repo        ← session header
 #     > Conv title                   3m ago       ← active opencode conversation
 #       Another conversation        14m ago
+#
 #   aid@other-proj  [dead]                        ← dead session header
 #
 # Each output line is tab-delimited:
@@ -16,8 +17,7 @@
 #   [conv:<session_id>:<tmux_session>]  — opencode conversation
 #   [noconv:<tmux_session>]      — placeholder when no conversations found
 #
-# Collapse state: AID_SESSIONS_COLLAPSE file, one session name per line.
-# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE
+# Env: AID_DATA, AID_DIR
 
 set -euo pipefail
 
@@ -26,12 +26,6 @@ set -euo pipefail
 
 # shellcheck source=lib/sessions/aid-meta
 source "$AID_DIR/lib/sessions/aid-meta"
-
-_collapse_file="${AID_SESSIONS_COLLAPSE:-}"
-_is_collapsed() {
-  [[ -n "$_collapse_file" && -f "$_collapse_file" ]] || return 1
-  grep -qxF "$1" "$_collapse_file" 2>/dev/null
-}
 
 _relative_time() {
   local ts="$1"
@@ -74,9 +68,7 @@ _opencode_conversations() {
 # ── Build list ────────────────────────────────────────────────────────────────
 
 # Live orchestrator sessions only (tagged @aid_mode=orchestrator at spawn time).
-# This excludes plain aid sessions that share the same tmux server.
-# Note: @aid_mode is the last field so we cannot rely on a trailing space —
-# use awk field comparison instead of grep to avoid that trap.
+# Note: @aid_mode is the last field so use awk field comparison, not grep.
 mapfile -t _live < <(
   tmux -L aid list-sessions \
     -F "#{session_last_attached} #{@aid_mode} #{session_name}" 2>/dev/null \
@@ -95,6 +87,9 @@ mapfile -t _dead < <(
 # Currently active session in this client (for marking).
 _current=$(tmux -L aid display-message -p "#{session_name}" 2>/dev/null || true)
 
+# Track whether we've emitted any output (for separator logic).
+_first_entry=1
+
 # ── Emit live sessions ────────────────────────────────────────────────────────
 for _session in "${_live[@]}"; do
   [[ -z "$_session" ]] && continue
@@ -102,21 +97,15 @@ for _session in "${_live[@]}"; do
   _repo=$(_meta_get "$_session" "repo_path")
   _branch=$(_meta_get "$_session" "branch")
 
+  # Blank separator line between sessions (not before the first one).
+  if [[ "$_first_entry" -eq 0 ]]; then
+    printf '\t[sep]\n'
+  fi
+  _first_entry=0
+
   # Active session marker.
   _marker='  '
   [[ "$_session" == "$_current" ]] && _marker='▶ '
-
-  # Collapse toggle.
-  _collapsed=0
-  _is_collapsed "$_session" && _collapsed=1
-
-  if (( _collapsed )); then
-    printf '%s▶ aid@%s  \033[2m[live]\033[0m%s\t[session:%s]\n' \
-      "$_marker" "$_name" \
-      "${_repo:+  ${_repo}${_branch:+  (${_branch})}}" \
-      "$_session"
-    continue
-  fi
 
   printf '%s\033[1maid@%s\033[0m  \033[32m[live]\033[0m%s\t[session:%s]\n' \
     "$_marker" "$_name" \
@@ -176,6 +165,11 @@ for _session in "${_dead[@]}"; do
   _branch=$(_meta_get "$_session" "branch")
   _last=$(_meta_get "$_session" "last_active")
   _age=$(_relative_time "$_last")
+
+  if [[ "$_first_entry" -eq 0 ]]; then
+    printf '\t[sep]\n'
+  fi
+  _first_entry=0
 
   printf '  \033[2maid@%s  [dead]  %s%s\033[0m\t[dead:%s]\n' \
     "$_name" "$_age" \

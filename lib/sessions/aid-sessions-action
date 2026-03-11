@@ -3,7 +3,7 @@
 #
 # Usage: aid-sessions-action <action> <fzf-line>
 #
-# Actions: preview | toggle-collapse
+# Actions: preview
 #
 # fzf-line is the full tab-delimited line from fzf: "DISPLAY\tTAG"
 # TAG format (from aid-sessions-list):
@@ -11,8 +11,9 @@
 #   [dead:aid@<name>]
 #   [conv:<session_id>:<tmux_session>]
 #   [noconv:<tmux_session>]
+#   [sep]
 #
-# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE
+# Env: AID_DATA, AID_DIR
 
 set -euo pipefail
 
@@ -103,43 +104,19 @@ _do_preview() {
       printf '\nStart opencode and begin a conversation to see it here.\n'
       ;;
 
+    sep|"")
+      # Blank separator line — no preview.
+      ;;
+
     *)
       printf '%s\n' "$_tag"
       ;;
   esac
 }
 
-# ── toggle-collapse ────────────────────────────────────────────────────────────
-_do_toggle_collapse() {
-  local collapse_file="${AID_SESSIONS_COLLAPSE:-}"
-  [[ -n "$collapse_file" ]] || return 0
-
-  # Collapse key is the tmux session name (aid@<name>).
-  local key
-  case "$_tag" in
-    session:*) key="${_tag#session:}" ;;
-    dead:*)    key="${_tag#dead:}" ;;
-    conv:*)
-      local rest="${_tag#conv:}"
-      key="${rest#*:}"   # tmux_session part
-      ;;
-    noconv:*)  key="${_tag#noconv:}" ;;
-    *) return 0 ;;
-  esac
-  [[ -z "$key" ]] && return 0
-
-  if grep -qxF "$key" "$collapse_file" 2>/dev/null; then
-    grep -vxF "$key" "$collapse_file" > "${collapse_file}.tmp" \
-      && mv "${collapse_file}.tmp" "$collapse_file" || true
-  else
-    printf '%s\n' "$key" >> "$collapse_file"
-  fi
-}
-
 # ── dispatch ───────────────────────────────────────────────────────────────────
 case "$_action" in
-  preview)          _do_preview ;;
-  toggle-collapse)  _do_toggle_collapse ;;
+  preview) _do_preview ;;
   *)
     printf 'aid-sessions-action: unknown action "%s"\n' "$_action" >&2
     exit 1

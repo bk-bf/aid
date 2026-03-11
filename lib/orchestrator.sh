@@ -193,11 +193,11 @@ _attach_or_switch() {
 }
 
 # ── Prompt for first session ──────────────────────────────────────────────────
-# If there are no existing aid@<project>/<slug> sessions (other than aid@dashboard), prompt the
-# user to create the first one, defaulting to the current directory.
+# Creates a new session via a series of fzf prompts.
 #
-# All input is collected via fzf --print-query so this works inside tmux
-# display-popup / execute(...) contexts that have no controlling tty.
+# Always runs inside a tmux display-popup so fzf has a real tty.
+# When called outside a popup (AID_IN_NEW_POPUP unset), it re-execs itself
+# inside one by opening a display-popup running orchestrator.sh --new.
 #
 # _fzf_prompt <label> <default>
 # Single-field fzf prompt: pre-fills <default> as the query; Enter confirms.
@@ -219,6 +219,13 @@ _fzf_prompt() {
 }
 
 _prompt_new_session() {
+  # If we're not already inside the popup, open one and re-exec --new inside it.
+  if [[ "${AID_IN_NEW_POPUP:-0}" -ne 1 ]]; then
+    tmux -L aid display-popup -E -w 72 -h 20 \
+      "AID_IN_NEW_POPUP=1 AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new"
+    return
+  fi
+
   local default_project default_slug default_repo
   default_repo="$PWD"
   default_project=$(basename "$PWD" | sed 's/^\.*//' | tr -cs '[:alnum:]-_' '-' | sed 's/-$//')

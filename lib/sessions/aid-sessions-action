@@ -162,6 +162,19 @@ _do_toggle_collapse() {
 }
 
 # ── dispatch ───────────────────────────────────────────────────────────────────
+# rename and delete show interactive fzf prompts that need a real tty.
+# When called from inside fzf execute(...) there is no tty, so re-exec inside
+# a display-popup unless already running in one (AID_IN_ACTION_POPUP=1).
+case "$_action" in
+  rename|delete)
+    if [[ "${AID_IN_ACTION_POPUP:-0}" -ne 1 ]]; then
+      tmux -L aid display-popup -E -w 72 -h 10 \
+        "AID_IN_ACTION_POPUP=1 AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "${AID_SESSIONS_COLLAPSE:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action") $(printf '%q' "$_action") $(printf '%q' "$_line")"
+      exit 0
+    fi
+    ;;
+esac
+
 case "$_action" in
   preview)          _do_preview ;;
   rename)           _do_rename ;;

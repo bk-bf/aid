@@ -85,7 +85,7 @@ _selected=$(printf '%s\n' "$_initial_list" | fzf \
   --bind "z:execute-silent($_act toggle-collapse {})+reload($_lst 2>/dev/null)" \
   --bind "r:execute($_act rename {})+reload($_lst 2>/dev/null)" \
   --bind "d:execute($_act delete {})+reload($_lst 2>/dev/null)" \
-  --bind "n:execute(AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
+  --bind "n:execute-silent(AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
   --bind "q:abort" \
   --bind "esc:abort" \
   2>/dev/null \

@@ -545,15 +545,23 @@ while true; do
     --preview-window='right:45%:wrap:border-left:hidden' \
     --preview-label=' info ' \
     --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
-    --bind "start:pos(${_start_pos})" \
+    --sync \
+    --bind "start:execute-silent(
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s START start fired: want_pos=${_start_pos} FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
+    )+pos(${_start_pos})" \
     --bind "ctrl-r:transform:${_rld} ctrl-r" \
+    --bind "result:execute-silent:
+      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+      [[ -n ${_dbglog} ]] && printf '%s RESLT result fired: FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
+    " \
     --bind "focus:execute-silent:
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
     " \
     --bind "load:execute-silent:
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s LOAD  list ready FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
+      [[ -n ${_dbglog} ]] && printf '%s LOAD  load fired: FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
     " \
     --bind "up:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")

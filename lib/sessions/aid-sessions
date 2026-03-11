@@ -83,9 +83,9 @@ _selected=$(printf '%s\n' "$_initial_list" | fzf \
   --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
   --bind "ctrl-r:reload($_lst 2>/dev/null)" \
   --bind "z:execute-silent($_act toggle-collapse {})+reload($_lst 2>/dev/null)" \
-  --bind "r:execute($_act rename {})+reload($_lst 2>/dev/null)" \
-  --bind "d:execute($_act delete {})+reload($_lst 2>/dev/null)" \
-  --bind "n:execute-silent(AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
+  --bind "r:execute(AID_CALLER_PANE=\$TMUX_PANE $_act rename {})+reload($_lst 2>/dev/null)" \
+  --bind "d:execute(AID_CALLER_PANE=\$TMUX_PANE $_act delete {})+reload($_lst 2>/dev/null)" \
+  --bind "n:execute-silent(AID_CALLER_PANE=\$TMUX_PANE AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") TMUX=\$TMUX $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new)+abort" \
   --bind "q:abort" \
   --bind "esc:abort" \
   2>/dev/null \

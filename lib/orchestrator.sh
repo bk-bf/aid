@@ -180,15 +180,28 @@ _write_session_metadata() {
 }
 
 # _attach_or_switch <session>
-# Use switch-client when the current terminal is a client of the aid server
-# (avoids calling switch-client from a different tmux server or plain terminal).
+# Switch the calling client to <session>.
+# AID_CALLER_PANE (set when re-exec'd inside a popup) is used to resolve the
+# exact client tty so we never accidentally switch a different terminal.
+# Falls back to the current $TMUX_PANE, then to a plain attach.
 _attach_or_switch() {
+  local _target_session="$1"
+  local _pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
   local _sock
   _sock=$(printf '%s' "${TMUX:-}" | cut -d',' -f1)
   if [[ -n "${TMUX:-}" && "$(basename "$_sock")" == "aid" ]]; then
-    tmux -L aid switch-client -t "$1"
+    if [[ -n "$_pane" ]]; then
+      # Resolve the client tty from the caller pane, then switch that client.
+      local _client_tty
+      _client_tty=$(tmux -L aid display-message -t "$_pane" -p "#{client_tty}" 2>/dev/null || true)
+      if [[ -n "$_client_tty" ]]; then
+        tmux -L aid switch-client -c "$_client_tty" -t "$_target_session"
+        return
+      fi
+    fi
+    tmux -L aid switch-client -t "$_target_session"
   else
-    tmux -L aid attach -t "$1"
+    tmux -L aid attach -t "$_target_session"
   fi
 }
 
@@ -220,9 +233,14 @@ _fzf_prompt() {
 
 _prompt_new_session() {
   # If we're not already inside the popup, open one and re-exec --new inside it.
+  # Use -t "$TMUX_PANE" (or AID_CALLER_PANE if already re-exec'd) so the popup
+  # appears on the correct client, not on an arbitrary one.
   if [[ "${AID_IN_NEW_POPUP:-0}" -ne 1 ]]; then
-    tmux -L aid display-popup -E -w 72 -h 20 \
-      "AID_IN_NEW_POPUP=1 AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new"
+    local _pane="${AID_CALLER_PANE:-${TMUX_PANE:-}}"
+    local _t_flag=()
+    [[ -n "$_pane" ]] && _t_flag=(-t "$_pane")
+    tmux -L aid display-popup -E -w 72 -h 20 "${_t_flag[@]}" \
+      "AID_IN_NEW_POPUP=1 AID_CALLER_PANE=$(printf '%q' "${_pane:-}") AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "$AID_CONFIG") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/orchestrator.sh") --new"
     return
   fi
 

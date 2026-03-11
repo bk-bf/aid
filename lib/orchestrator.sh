@@ -33,15 +33,8 @@ _ensure_server() {
     tmux -L aid -f "$AID_DIR/tmux.conf" new-session -d -s "aid@dashboard" \
       -x "$(tput cols)" -y "$(tput lines)"
     tmux -L aid source-file "$AID_DATA/tmux/palette.conf"
-    # Inject shared env vars into the server so every spawned session inherits them.
-    tmux -L aid set-environment -g AID_DIR                  "$AID_DIR"
-    tmux -L aid set-environment -g AID_DATA                 "$AID_DATA"
-    tmux -L aid set-environment -g AID_CONFIG               "$AID_CONFIG"
-    tmux -L aid set-environment -g XDG_DATA_HOME            "$AID_DATA"
     tmux -L aid set-environment -g XDG_STATE_HOME           "$HOME/.local/state/aid"
     tmux -L aid set-environment -g XDG_CACHE_HOME           "$HOME/.cache/aid"
-    tmux -L aid set-environment -g OPENCODE_CONFIG_DIR      "$AID_DIR/opencode"
-    tmux -L aid set-environment -g OPENCODE_TUI_CONFIG      "$AID_DIR/opencode/tui.json"
     tmux -L aid set-environment -g TMUX_PLUGIN_MANAGER_PATH "$AID_DATA/tmux/plugins/"
     tmux -L aid set-environment -g NVIM_APPNAME             "nvim"
     # Replicate treemux key setup from aid.sh (TPM targets default socket, not -L aid).
@@ -54,6 +47,15 @@ _ensure_server() {
   else
     dbg "server already running"
   fi
+  # Always update AID_DIR/AID_DATA/AID_CONFIG in the server environment so that
+  # sessions spawned from a branch install use the branch's paths, even when the
+  # server was originally started by a different (e.g. main) aid install.
+  tmux -L aid set-environment -g AID_DIR             "$AID_DIR"
+  tmux -L aid set-environment -g AID_DATA            "$AID_DATA"
+  tmux -L aid set-environment -g AID_CONFIG          "$AID_CONFIG"
+  tmux -L aid set-environment -g XDG_DATA_HOME       "$AID_DATA"
+  tmux -L aid set-environment -g OPENCODE_CONFIG_DIR "$AID_DIR/opencode"
+  tmux -L aid set-environment -g OPENCODE_TUI_CONFIG "$AID_DIR/opencode/tui.json"
 }
 
 # spawn_orc_session <project> <slug> <repo_path>

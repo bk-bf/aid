@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# aid-popup — display a native tmux floating menu and print the chosen item.
+#
+# Usage:
+#   aid-popup -t <title> [options] -- <label>[:<key>] [<label>[:<key>] ...]
+#
+# Options:
+#   -t <title>   Menu title (required)
+#   -x <pos>     Horizontal position (default: C — centred)
+#   -y <pos>     Vertical position   (default: C — centred)
+#   -d <secs>    Dismiss timeout in seconds; fires empty choice (default: 10)
+#
+# Each argument after -- is a menu item of the form:
+#   label        — shown in menu; no shortcut key
+#   label:key    — shown in menu; key is the single-character shortcut
+#
+# Separator lines can be inserted by passing the special token "-".
+#
+# Output:
+#   Prints the chosen label (without the :key suffix) to stdout.
+#   Prints nothing if the menu was dismissed (Escape / timeout).
+#   Exit code is always 0.
+#
+# Examples:
+#   # Simple yes/no
+#   answer=$(aid-popup -t "Delete this conversation?" -- "Yes:y" "No:n")
+#   [[ "$answer" == "Yes" ]] && do_delete
+#
+#   # Three choices
+#   choice=$(aid-popup -t "What now?" -- "Open:o" "Rename:r" "Delete:d" "-" "Cancel:c")
+#
+# Environment:
+#   AID_DEBUG_LOG  — if set, debug lines are appended to this file
+
+set -euo pipefail
+
+# ── Defaults ──────────────────────────────────────────────────────────────────
+_title=""
+_x="C"
+_y="C"
+_timeout=10
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -t) _title="$2";   shift 2 ;;
+    -x) _x="$2";       shift 2 ;;
+    -y) _y="$2";       shift 2 ;;
+    -d) _timeout="$2"; shift 2 ;;
+    --) shift; break ;;
+    *)  break ;;        # allow calling without -- for simple cases
+  esac
+done
+
+if [[ -z "$_title" ]]; then
+  printf 'aid-popup: -t <title> is required\n' >&2
+  exit 1
+fi
+
+if [[ $# -eq 0 ]]; then
+  printf 'aid-popup: at least one menu item required\n' >&2
+  exit 1
+fi
+
+# ── Debug helper ──────────────────────────────────────────────────────────────
+_dbg() {
+  [[ -z "${AID_DEBUG_LOG:-}" ]] && return 0
+  local _ms; _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+  printf '%s POPUP %s\n' "$_ms" "$*" >> "$AID_DEBUG_LOG"
+}
+
+# ── Build menu items ──────────────────────────────────────────────────────────
+# display-menu takes:  name  key  command  [name key command ...]
+# Separator:           ""    ""   ""
+#
+# We write the chosen label into a fifo via run-shell.
+_fifo=$(mktemp -u /tmp/aid-popup-XXXXXX)
+mkfifo "$_fifo"
+_dbg "fifo=${_fifo} title='${_title}' items=$*"
+
+# Escape the fifo path once for embedding in the run-shell commands.
+_fifo_q=$(printf '%q' "$_fifo")
+
+_menu_args=()
+for _item in "$@"; do
+  if [[ "$_item" == "-" ]]; then
+    # Separator line
+    _menu_args+=("" "" "")
+    continue
+  fi
+  # Split on the last colon to get label and optional key.
+  if [[ "$_item" == *:? ]]; then
+    _label="${_item%:?}"
+    _key="${_item##*:}"
+  else
+    _label="$_item"
+    _key=""
+  fi
+  # run-shell command: write label to fifo so the blocking read below unblocks.
+  _cmd="run-shell 'printf %s $(printf '%q' "$_label") > ${_fifo_q}'"
+  _menu_args+=("$_label" "$_key" "$_cmd")
+done
+
+# ── Guard: fires if user presses Escape (menu dismissed with no selection) ────
+(
+  sleep "$_timeout"
+  printf '' > "$_fifo" 2>/dev/null || true
+) &
+_guard_pid=$!
+
+# ── Show the menu ─────────────────────────────────────────────────────────────
+tmux -L aid display-menu \
+  -T " ${_title} " \
+  -x "$_x" \
+  -y "$_y" \
+  "${_menu_args[@]}" \
+  2>/dev/null || true
+
+# ── Collect answer ────────────────────────────────────────────────────────────
+_answer=$(cat "$_fifo" 2>/dev/null || true)
+kill "$_guard_pid" 2>/dev/null || true
+rm -f "$_fifo"
+
+_dbg "answer='${_answer:-<dismissed>}'"
+printf '%s' "$_answer"

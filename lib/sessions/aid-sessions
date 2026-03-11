@@ -177,7 +177,15 @@ _fzf_prompt() {
 
 _do_rename() {
   local session="$1"
-  case "$session" in dead:*|"") return ;; esac
+  case "$session" in
+    dead:*|"") return ;;
+    conv:*)
+      # tag format: conv:<session_id>:<tmux_session> — extract parent session
+      local _rest="${session#conv:}"
+      session="${_rest#*:}"
+      ;;
+    *) ;;
+  esac
   # Strip "session:" prefix if present.
   session="${session#session:}"
   local old_name new_name
@@ -209,7 +217,15 @@ _do_delete() {
   case "$tag" in
     dead:*)    session="${tag#dead:}" ;;
     session:*) session="${tag#session:}" ;;
-    *)         return ;;
+    conv:*)
+      # tag format: conv:<session_id>:<tmux_session>
+      local _rest="${tag#conv:}"
+      session="${_rest#*:}"
+      ;;
+    *)
+      _dbg DEL "delete: unsupported tag type '${tag}', ignoring"
+      return
+      ;;
   esac
 
   _dbg DEL "confirm prompt for ${session}"

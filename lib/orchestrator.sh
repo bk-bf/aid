@@ -30,6 +30,16 @@ source "$AID_DIR/lib/sessions/aid-meta"
 
 dbg() { [[ "${AID_DEBUG:-0}" -eq 1 ]] && echo "[orc:debug] $*" >&2 || true; }
 
+# _spawn_log <log_file> <message>
+# Write a structured SPAWN log line to the debug log file (when set).
+# Format matches aid-sessions: "<unix_ms> SPAWN <message>"
+_spawn_log() {
+  local _log="$1"; shift
+  [[ -z "$_log" ]] && return 0
+  local _ms; _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+  printf '%s SPAWN %s\n' "$_ms" "$*" >> "$_log"
+}
+
 # ── tmux server bootstrap ─────────────────────────────────────────────────────
 
 _ensure_server() {
@@ -100,9 +110,7 @@ spawn_orc_session() {
   dbg "spawning session=$session repo=$repo_path"
 
   # Per-session nvim socket.
-  local safe_name nvim_socket debug_log dbg_pane
-  debug_log=""
-  dbg_pane=""
+  local safe_name nvim_socket
   safe_name=$(printf '%s' "$name" | tr '/' '-')
   nvim_socket="/tmp/aid-nvim-${safe_name}.sock"
 
@@ -113,7 +121,6 @@ spawn_orc_session() {
 
   tmux -L aid new-session -d -s "$session" -c "$repo_path" \
     -x "$(tput cols)" -y "$(tput lines)"
-
   tmux -L aid source-file "$AID_DATA/tmux/palette.conf"
 
   # Pre-seed vimbridge placeholders.
@@ -155,6 +162,7 @@ spawn_orc_session() {
       -l "25%" -- sleep infinity)
     tmux -L aid set-environment -t "$session" AID_DEBUG_LOG "$debug_log"
     dbg "dbg_pane=$dbg_pane debug_log=$debug_log"
+    _spawn_log "$debug_log" "session=${session} repo=${repo_path} port=${orc_port} nav=${nav_pane} dbg=${dbg_pane} log=${debug_log}"
   fi
 
   # Split the top pane (nav_pane) vertically: right side becomes opencode.
@@ -163,6 +171,7 @@ spawn_orc_session() {
     -l "75%" -- sleep infinity)
 
   dbg "nav=$nav_pane orc=$orc_pane"
+  _spawn_log "$debug_log" "panes ready: nav=${nav_pane} orc=${orc_pane}${dbg_pane:+ dbg=${dbg_pane}}"
 
   # Store pane IDs in session env so aid-sessions can find the opencode pane.
   tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE "$nav_pane"
@@ -170,26 +179,34 @@ spawn_orc_session() {
 
   # Start opencode in the right pane with a fixed HTTP port so the navigator
   # can reach the /tui/select-session API without port discovery.
+  _spawn_log "$debug_log" "respawn orc_pane=${orc_pane}: opencode --port ${orc_port} ${repo_path}"
   tmux -L aid respawn-pane -k -t "$orc_pane" \
     "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
+  _spawn_log "$debug_log" "orc_pane=${orc_pane} respawned (opencode)"
 
   # Start the navigator in the left pane (aid-sessions: fzf-based navigator).
   local nav_env
   nav_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}")"
   [[ -n "$debug_log" ]] && nav_env+=" AID_DEBUG_LOG=$(printf '%q' "$debug_log")"
+  _spawn_log "$debug_log" "respawn nav_pane=${nav_pane}: aid-sessions"
   tmux -L aid respawn-pane -k -t "$nav_pane" \
     "${nav_env} $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions")"
+  _spawn_log "$debug_log" "nav_pane=${nav_pane} respawned (aid-sessions)"
 
   # Start the debug log viewer if in debug mode.
   if [[ -n "$dbg_pane" && -n "$debug_log" ]]; then
+    _spawn_log "$debug_log" "respawn dbg_pane=${dbg_pane}: aid-sessions-debug"
     tmux -L aid respawn-pane -k -t "$dbg_pane" \
       "AID_DEBUG_LOG=$(printf '%q' "$debug_log") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-debug")"
+    _spawn_log "$debug_log" "dbg_pane=${dbg_pane} respawned (aid-sessions-debug)"
   fi
 
   # ── Window 1: nvim ──
+  _spawn_log "$debug_log" "creating nvim window"
   tmux -L aid new-window -t "$session" -n "nvim" -c "$repo_path"
   local nvim_pane
   nvim_pane=$(tmux -L aid list-panes -t "${session}:nvim" -F "#{pane_id}" | head -1)
+  _spawn_log "$debug_log" "nvim window created: nvim_pane=${nvim_pane}"
 
   # Treemux sidebar in nvim window.
   _tmx() { tmux -L aid show-option -gqv "$1"; }
@@ -201,8 +218,10 @@ spawn_orc_session() {
   tmux -L aid set-option -gq "@treemux-key-Bspace" "$treemux_args_focus"
   tmux -L aid run-shell -t "$nvim_pane" "$AID_DIR/lib/ensure_treemux.sh"
 
+  _spawn_log "$debug_log" "respawn nvim_pane=${nvim_pane}: nvim --listen ${nvim_socket}"
   tmux -L aid respawn-pane -k -t "$nvim_pane" \
     "cd $(printf '%q' "$repo_path") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") XDG_DATA_HOME=$(printf '%q' "$AID_DATA") XDG_STATE_HOME=$HOME/.local/state/aid XDG_CACHE_HOME=$HOME/.cache/aid LG_CONFIG_FILE=$(printf '%q' "$AID_CONFIG/lazygit/config.yml") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
+  _spawn_log "$debug_log" "nvim_pane=${nvim_pane} respawned (nvim)"
 
   # Return to window 0 (3-pane layout).
   tmux -L aid select-window -t "${session}:0"
@@ -230,7 +249,9 @@ spawn_orc_session() {
        'set-option -t $(printf '%q' "$session") status-left $(printf '%q' "$orc_label") ; set-option -t $(printf '%q' "$session") status-right \"\"'"
 
   dbg "session $session ready"
+  _spawn_log "$debug_log" "session=${session} ready — calling _attach_or_switch"
   _attach_or_switch "$session"
+  _spawn_log "$debug_log" "_attach_or_switch returned (rc=$?)"
 }
 
 # ── New session prompt ────────────────────────────────────────────────────────

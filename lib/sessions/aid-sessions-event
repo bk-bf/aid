@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# aid-sessions-event — fzf event and key handler for aid-sessions.
+#
+# Called from every fzf --bind as execute-silent so all bind logic lives in
+# a real shell script: shellcheck works, LINENO is correct, ERR traps work.
+#
+# Usage:
+#   aid-sessions-event <event> [<extra>]
+#
+# Events / keys:
+#   start <want_pos>   — fzf start: event; logs wanted vs actual position
+#   load               — fzf load: event; rebinds n/r/d/enter
+#   result             — fzf result: event (debug only)
+#   focus              — fzf focus: event (debug only)
+#   up | down | page-up | page-down  — navigation key (debug only)
+#   enter | n | r | d  — action keys; writes FZF_POS + key name to pos/key files
+#   esc | q            — quit keys (debug only; fzf handles abort)
+#
+# Env vars set by fzf (all available in execute-silent):
+#   FZF_POS          — 1-based cursor row
+#   FZF_MATCH_COUNT  — number of matched items
+#   FZF_ACTION       — name of the action that triggered this bind
+#
+# Env vars set by aid-sessions (inherited via respawn-pane inline env):
+#   AID_DEBUG_LOG    — path to debug log file (optional; skip logging if unset)
+#   AID_FZF_POS_FILE — tempfile path for passing FZF_POS back to the shell
+#   AID_FZF_KEY_FILE — tempfile path for passing the pressed key back to the shell
+
+set -euo pipefail
+
+_event="${1:-}"
+_extra="${2:-}"
+
+_pos="${FZF_POS:-1}"
+_mc="${FZF_MATCH_COUNT:-?}"
+_fa="${FZF_ACTION:-?}"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Write directly to the log file (no pipe/daemon — this script is a short-lived
+# child spawned by fzf execute-silent; the daemon is in the aid-sessions parent).
+_log() {
+  [[ -z "${AID_DEBUG_LOG:-}" ]] && return 0
+  local _ms; _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+  printf '%s %s\n' "$_ms" "$*" >> "$AID_DEBUG_LOG"
+}
+
+# ── Pos/key file write ────────────────────────────────────────────────────────
+# For action keys (enter/n/r/d): write FZF_POS and key name to the tempfiles
+# so the aid-sessions loop can read them after fzf exits via +accept.
+_write_pos_key() {
+  local _key="$1"
+  if [[ -n "${AID_FZF_POS_FILE:-}" ]]; then
+    printf '%s' "$_pos" > "$AID_FZF_POS_FILE"
+  fi
+  if [[ -n "${AID_FZF_KEY_FILE:-}" ]]; then
+    printf '%s' "$_key" > "$AID_FZF_KEY_FILE"
+  fi
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+case "$_event" in
+  start)
+    _log "START start fired: want_pos=${_extra:-?} FZF_POS=${_pos} FZF_MATCH_COUNT=${_mc}"
+    ;;
+  load)
+    _log "LOAD  load fired: FZF_POS=${_pos} FZF_MATCH_COUNT=${_mc}"
+    ;;
+  result)
+    _log "RESLT result fired: FZF_POS=${_pos} FZF_MATCH_COUNT=${_mc}"
+    ;;
+  focus)
+    _log "POS   focus FZF_POS=${_pos} FZF_ACTION=${_fa}"
+    ;;
+  up|down|page-up|page-down)
+    _log "KEY   ${_event} FZF_POS=${_pos}"
+    ;;
+  enter)
+    _log "KEY   enter FZF_POS=${_pos}"
+    _write_pos_key "enter"
+    ;;
+  n)
+    _log "ACTN  n (new session) FZF_POS=${_pos}"
+    _write_pos_key "n"
+    ;;
+  r)
+    _log "ACTN  r (rename) FZF_POS=${_pos}"
+    _write_pos_key "r"
+    ;;
+  d)
+    _log "ACTN  d (delete) FZF_POS=${_pos}"
+    _write_pos_key "d"
+    ;;
+  esc)
+    _log "KEY   esc (quit)"
+    ;;
+  q)
+    _log "KEY   q (quit)"
+    ;;
+  *)
+    _log "EVNT  unknown event: ${_event}"
+    ;;
+esac

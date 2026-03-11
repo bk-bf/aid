@@ -453,15 +453,27 @@ fi
 _fzf_port=$(( 49200 + RANDOM % 1000 ))
 _dbg INIT "fzf --listen port=${_fzf_port}"
 
-_act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
-_lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
-_dbglog=$(printf '%q' "${AID_DEBUG_LOG:-}")
-# Quoted invocation of the reload helper — shared by ticker and ctrl-r.
-# The helper reads FZF_POS / FZF_MATCH_COUNT from its env (set by fzf) and
-# emits a reload-sync+pos action string to stdout.
-_rld="AID_DEBUG_LOG=${_dbglog} AID_SESSIONS_LST=$(printf '%q' "${_lst}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
+# ── Invocation strings for fzf child processes ────────────────────────────────
+# Each is a shell-quoted command string that fzf spawns via execute-silent or
+# transform.  All required env vars are baked in at this point so fzf doesn't
+# need to inherit them.
 
-_dbg INIT "vars ready: act/lst/rld/dbglog set"
+# Preview dispatcher (aid-sessions-action preview {}).
+_act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
+
+# List generator (aid-sessions-list).
+_lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
+
+# Reload helper (aid-sessions-reload): reads FZF_POS/FZF_MATCH_COUNT from env,
+# emits a reload-sync+pos action string to stdout.  Used by ticker + ctrl-r.
+_rld="AID_DEBUG_LOG=$(printf '%q' "${AID_DEBUG_LOG:-}") AID_SESSIONS_LST=$(printf '%q' "${_lst}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
+
+# Event/key handler (aid-sessions-event): handles all fzf --bind execute-silent
+# calls.  Writes debug log lines and pos/key tempfiles for action keys.
+# AID_FZF_POS_FILE and AID_FZF_KEY_FILE are set below after mktemp.
+_evt_base="AID_DEBUG_LOG=$(printf '%q' "${AID_DEBUG_LOG:-}") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-event")"
+
+_dbg INIT "vars ready: act/lst/rld/evt set"
 
 # Background auto-refresh: every 5 s send a reload command to fzf via --listen.
 # Spawned ONCE here — never re-spawned across loop iterations (Bug 2 fix).
@@ -469,7 +481,6 @@ _dbg INIT "vars ready: act/lst/rld/dbglog set"
 # it and emits reload-sync+pos, preserving the cursor across auto-refreshes.
 (
   # Give fzf a moment to start and bind to the port.
-  # Log when the ticker wakes up so the timeline is visible in the debug log.
   if [[ -n "${AID_DEBUG_LOG:-}" ]]; then
     _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
     printf '%s TICK  ticker sleeping 2s before first attempt (port=%s)\n' \
@@ -500,14 +511,15 @@ _dbg INIT "vars ready: act/lst/rld/dbglog set"
   done
 ) &
 _ticker_pid=$!
-# Tempfile used to pass FZF_POS back to the shell after fzf exits.
-# fzf does not expose FZF_POS to the parent shell after exit; the enter/n/r/d
-# binds write the current position here (via execute-silent) just before
-# accept/abort so we can restore the cursor to the same row on reopen.
+
+# Tempfiles used to pass FZF_POS and the pressed key back to the shell.
+# fzf's execute-silent children inherit FZF_POS as an env var, but fzf does
+# not expose it to the parent after exit.  The aid-sessions-event script
+# writes these files just before fzf exits via +accept (enter/n/r/d binds).
 _FZF_POS_FILE=$(mktemp /tmp/aid-fzf-pos-XXXXXX)
-# Companion file that captures the exit key for n/r/d binds (written alongside
-# _FZF_POS_FILE inside the fzf execute-silent so pos is always in sync with key).
 _FZF_KEY_FILE=$(mktemp /tmp/aid-fzf-key-XXXXXX)
+# Bake tempfile paths into the event handler invocation string.
+_evt="${_evt_base} AID_FZF_POS_FILE=$(printf '%q' "$_FZF_POS_FILE") AID_FZF_KEY_FILE=$(printf '%q' "$_FZF_KEY_FILE")"
 
 trap 'kill "$_ticker_pid" 2>/dev/null || true; rm -f "$_FZF_POS_FILE" "$_FZF_KEY_FILE"; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 
@@ -517,9 +529,7 @@ trap 'kill "$_ticker_pid" 2>/dev/null || true; rm -f "$_FZF_POS_FILE" "$_FZF_KEY
 # keeps running against the same port.
 #
 # _start_pos: cursor row to restore when fzf reopens after an action.
-# fzf does not expose FZF_POS to the parent shell after exit, so we capture it
-# by writing $FZF_POS to _FZF_POS_FILE inside the enter/n/r/d execute-silent
-# binds (which run before accept/abort).  After fzf exits we read it back.
+# Written to _FZF_POS_FILE by aid-sessions-event (enter/n/r/d) before +accept.
 # Defaults to 1 on first open and on any action that intentionally resets pos.
 _start_pos=1
 
@@ -537,6 +547,25 @@ while true; do
   fi
   _dbg STDIN "list ready: ${_initial_lines} lines"
 
+  # ── fzf invocation ─────────────────────────────────────────────────────────
+  # All --bind execute-silent calls delegate to aid-sessions-event so no shell
+  # code lives inside the fzf argument strings.  This keeps the invocation
+  # readable and makes the event handler independently shellcheck-able.
+  #
+  # Key/event mapping:
+  #   start     → log + pos(N) + unbind action keys until load fires
+  #   load      → log + rebind action keys (list is ready)
+  #   result    → log only
+  #   focus     → log only
+  #   up/down/page-up/page-down → log + move
+  #   enter     → log + write pos/key files + accept (exits fzf)
+  #   n/r/d     → log + write pos/key files + accept (exits fzf)
+  #   esc/q     → log + abort (exits fzf with rc=1)
+  #   ctrl-r    → transform: reload (list refresh)
+  #
+  # Crash protection: fzf exit code is captured explicitly with || _fzf_rc=$?
+  # so that set -e / ERR trap never fires on fzf abort (rc=1) or signal death.
+  _fzf_rc=0
   _output=$(printf '%s\n' "$_initial_list" | fzf \
     --listen="${_fzf_port}" \
     --border=rounded \
@@ -555,82 +584,31 @@ while true; do
     --preview-label=' info ' \
     --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
     --sync \
-    --bind "start:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s START start fired: want_pos=${_start_pos} FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    )+pos(${_start_pos})+unbind(enter)+unbind(n)+unbind(r)+unbind(d)" \
+    --bind "start:execute-silent(${_evt} start ${_start_pos})+pos(${_start_pos})+unbind(enter)+unbind(n)+unbind(r)+unbind(d)" \
+    --bind "load:execute-silent(${_evt} load)+rebind(enter)+rebind(n)+rebind(r)+rebind(d)" \
+    --bind "result:execute-silent(${_evt} result)" \
+    --bind "focus:execute-silent(${_evt} focus)" \
+    --bind "up:execute-silent(${_evt} up)+up" \
+    --bind "down:execute-silent(${_evt} down)+down" \
+    --bind "page-up:execute-silent(${_evt} page-up)+page-up" \
+    --bind "page-down:execute-silent(${_evt} page-down)+page-down" \
+    --bind "enter:execute-silent(${_evt} enter)+accept" \
+    --bind "esc:execute-silent(${_evt} esc)+abort" \
+    --bind "q:execute-silent(${_evt} q)+abort" \
+    --bind "n:execute-silent(${_evt} n)+accept" \
+    --bind "r:execute-silent(${_evt} r)+accept" \
+    --bind "d:execute-silent(${_evt} d)+accept" \
     --bind "ctrl-r:transform:${_rld} ctrl-r" \
-    --bind "result:execute-silent:
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s RESLT result fired: FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    " \
-    --bind "focus:execute-silent:
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
-    " \
-    --bind "load:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s LOAD  load fired: FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
-    )+rebind(enter)+rebind(n)+rebind(r)+rebind(d)" \
-    --bind "up:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-    )+up" \
-    --bind "down:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-    )+down" \
-    --bind "page-up:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   page-up FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-    )+page-up" \
-    --bind "page-down:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   page-down FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-    )+page-down" \
-    --bind "enter:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   enter FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
-      printf 'enter' > $(printf '%q' "$_FZF_KEY_FILE")
-    )+accept" \
-    --bind "esc:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   esc (quit)\n' \"\$_ms\" >> ${_dbglog}
-    )+abort" \
-    --bind "q:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s KEY   q (quit)\n' \"\$_ms\" >> ${_dbglog}
-    )+abort" \
-    --bind "n:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s ACTN  n (new session) FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
-      printf 'n' > $(printf '%q' "$_FZF_KEY_FILE")
-    )+accept" \
-    --bind "r:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s ACTN  r (rename) FZF_POS=%s tag={2}\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
-      printf 'r' > $(printf '%q' "$_FZF_KEY_FILE")
-    )+accept" \
-    --bind "d:execute-silent(
-      _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
-      [[ -n ${_dbglog} ]] && printf '%s ACTN  d (delete) FZF_POS=%s tag={2}\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
-      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
-      printf 'd' > $(printf '%q' "$_FZF_KEY_FILE")
-    )+accept" \
-    2>/dev/null \
-    || true)
+    2>/dev/null) || _fzf_rc=$?
+  _dbg KEY "fzf exited rc=${_fzf_rc}"
 
-  # n/r/d binds use +accept and write "key:tag" to _FZF_KEY_FILE so that
-  # FZF_POS is correctly captured inside execute-silent.  enter uses the normal
-  # --accept-nth=2 output path.  esc/q use +abort (fzf rc=1, _output is empty).
+  # Read pos/key written by aid-sessions-event (enter/n/r/d paths).
+  # esc/q leave these files empty → _key and _tag will be empty → break below.
   _key=$(cat "$_FZF_KEY_FILE" 2>/dev/null || true)
   _tag=$(printf '%s' "$_output" | tr -d '[]')
 
-  # Restore cursor position: read FZF_POS written by the enter/n/r/d bind.
-  # Fall back to 1 if the file is empty or missing (first open, esc/q quit).
+  # Restore cursor position from the tempfile.
+  # Fall back to 1 if empty (first open, esc/q quit, or signal-killed fzf).
   _start_pos=$(cat "$_FZF_POS_FILE" 2>/dev/null || true)
   : "${_start_pos:=1}"
   # Reset both files so a subsequent esc/q doesn't reuse stale values.

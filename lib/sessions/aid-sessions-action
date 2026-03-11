@@ -5,12 +5,14 @@
 #
 # Actions: preview | toggle-collapse
 #
-# rename and delete are now handled inline in aid-sessions (--expect state
-# machine) and no longer dispatched through this script.
+# fzf-line is the full tab-delimited line from fzf: "DISPLAY\tTAG"
+# TAG format (from aid-sessions-list):
+#   [session:aid@<name>]
+#   [dead:aid@<name>]
+#   [conv:<session_id>:<tmux_session>]
+#   [noconv:<tmux_session>]
 #
-# fzf-line is the full tab-delimited line from fzf: "DISPLAY\t[TAG]"
-#
-# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE (tmpfile for collapse state)
+# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE
 
 set -euo pipefail
 
@@ -23,57 +25,88 @@ source "$AID_DIR/lib/sessions/aid-meta"
 _action="$1"
 _line="${2:-}"
 
-# Extract the session tag from field 2 (the [bracket] part).
-_raw_tag=$(printf '%s' "$_line" | cut -f2 | tr -d '[]')
+# Extract the tag (strip brackets).
+_tag=$(printf '%s' "$_line" | cut -f2 | tr -d '[]')
 
 # ── preview ────────────────────────────────────────────────────────────────────
 _do_preview() {
-  case "$_raw_tag" in
-    __header__*)
-      local project="${_raw_tag#__header__}"
-      printf '\033[1;34m%s/\033[0m\n' "$project"
-      printf '\nProject group.\nPress \033[1mz\033[0m to collapse/expand.\n'
-      return
+  case "$_tag" in
+    session:*)
+      local session="${_tag#session:}"
+      local name="${session#aid@}"
+      local repo branch created last_active
+      repo=$(_meta_get "$session" "repo_path")
+      branch=$(_meta_get "$session" "branch")
+      created=$(_meta_get "$session" "created_at")
+      last_active=$(_meta_get "$session" "last_active")
+
+      printf '\033[1;36maid@%s\033[0m\n' "$name"
+      if tmux -L aid has-session -t "$session" 2>/dev/null; then
+        local nw np
+        nw=$(tmux -L aid list-windows -t "$session" 2>/dev/null | wc -l | tr -d ' ')
+        np=$(tmux -L aid list-panes   -t "$session" 2>/dev/null | wc -l | tr -d ' ')
+        printf '\033[1;32m● live\033[0m  %s windows  %s panes\n' "$nw" "$np"
+      else
+        printf '\033[1;31m✗ dead\033[0m  (press Enter to resurrect)\n'
+      fi
+      printf '\n'
+      [[ -n "$repo"        ]] && printf '\033[2mrepo        \033[0m %s\n' "$repo"
+      [[ -n "$branch"      ]] && printf '\033[2mbranch      \033[0m %s\n' "$branch"
+      [[ -n "$created"     ]] && printf '\033[2mcreated     \033[0m %s\n' "$created"
+      [[ -n "$last_active" ]] && printf '\033[2mlast active \033[0m %s\n' "$last_active"
+
+      if [[ -n "$repo" && -d "$repo" ]]; then
+        printf '\n'
+        local ahead behind
+        ahead=$(git  -C "$repo" rev-list --count "@{upstream}..HEAD" 2>/dev/null || true)
+        behind=$(git -C "$repo" rev-list --count "HEAD..@{upstream}" 2>/dev/null || true)
+        if [[ -n "$ahead" && -n "$behind" ]]; then
+          printf '\033[2mgit status  \033[0m ↑%s ahead  ↓%s behind\n' "$ahead" "$behind"
+        fi
+        local wt_status
+        wt_status=$(git -C "$repo" status --short 2>/dev/null | head -8 || true)
+        [[ -n "$wt_status" ]] && printf '\n%s\n' "$wt_status"
+      fi
       ;;
-    __dead__*) local session="${_raw_tag#__dead__}" ;;
-    *)         local session="$_raw_tag" ;;
+
+    dead:*)
+      local session="${_tag#dead:}"
+      local name="${session#aid@}"
+      local repo branch last_active
+      repo=$(_meta_get "$session" "repo_path")
+      branch=$(_meta_get "$session" "branch")
+      last_active=$(_meta_get "$session" "last_active")
+
+      printf '\033[1;31maid@%s  [dead]\033[0m\n' "$name"
+      printf '\nSession is not running.  Press Enter to resurrect it.\n'
+      printf '\n'
+      [[ -n "$repo"        ]] && printf '\033[2mrepo        \033[0m %s\n' "$repo"
+      [[ -n "$branch"      ]] && printf '\033[2mbranch      \033[0m %s\n' "$branch"
+      [[ -n "$last_active" ]] && printf '\033[2mlast active \033[0m %s\n' "$last_active"
+      ;;
+
+    conv:*)
+      local rest="${_tag#conv:}"
+      local conv_id="${rest%%:*}"
+      local tmux_session="${rest#*:}"
+      local repo
+      repo=$(_meta_get "$tmux_session" "repo_path")
+
+      printf '\033[1;34mConversation\033[0m  %s\n' "$conv_id"
+      printf '\033[2msession      \033[0m %s\n' "$tmux_session"
+      [[ -n "$repo" ]] && printf '\033[2mrepo         \033[0m %s\n' "$repo"
+      ;;
+
+    noconv:*)
+      local tmux_session="${_tag#noconv:}"
+      printf 'No opencode conversations yet in %s.\n' "$tmux_session"
+      printf '\nStart opencode and begin a conversation to see it here.\n'
+      ;;
+
+    *)
+      printf '%s\n' "$_tag"
+      ;;
   esac
-
-  local repo branch created last_active
-  repo=$(_meta_get "$session" "repo_path")
-  branch=$(_meta_get "$session" "branch")
-  created=$(_meta_get "$session" "created_at")
-  last_active=$(_meta_get "$session" "last_active")
-
-  printf '\033[1;36m%s\033[0m\n' "$session"
-
-  if tmux -L aid has-session -t "$session" 2>/dev/null; then
-    local _nw _np
-    _nw=$(tmux -L aid list-windows -t "$session" 2>/dev/null | wc -l | tr -d ' ')
-    _np=$(tmux -L aid list-panes   -t "$session" 2>/dev/null | wc -l | tr -d ' ')
-    printf '\033[1;32m● live\033[0m  %s windows  %s panes\n' "$_nw" "$_np"
-  else
-    printf '\033[1;31m✗ dead\033[0m  (press Enter to resurrect)\n'
-  fi
-
-  printf '\n'
-  [[ -n "$repo"        ]] && printf '\033[2mrepo       \033[0m %s\n' "$repo"
-  [[ -n "$branch"      ]] && printf '\033[2mbranch     \033[0m %s\n' "$branch"
-  [[ -n "$created"     ]] && printf '\033[2mcreated    \033[0m %s\n' "$created"
-  [[ -n "$last_active" ]] && printf '\033[2mlast active\033[0m %s\n' "$last_active"
-
-  if [[ -n "$repo" && -d "$repo" ]]; then
-    printf '\n'
-    local ahead behind
-    ahead=$(git  -C "$repo" rev-list --count "@{upstream}..HEAD" 2>/dev/null || true)
-    behind=$(git -C "$repo" rev-list --count "HEAD..@{upstream}" 2>/dev/null || true)
-    if [[ -n "$ahead" && -n "$behind" ]]; then
-      printf '\033[2mgit status\033[0m ↑%s ahead  ↓%s behind\n' "$ahead" "$behind"
-    fi
-    local wt_status
-    wt_status=$(git -C "$repo" status --short 2>/dev/null | head -8 || true)
-    [[ -n "$wt_status" ]] && printf '\n%s\n' "$wt_status"
-  fi
 }
 
 # ── toggle-collapse ────────────────────────────────────────────────────────────
@@ -81,22 +114,25 @@ _do_toggle_collapse() {
   local collapse_file="${AID_SESSIONS_COLLAPSE:-}"
   [[ -n "$collapse_file" ]] || return 0
 
-  local project
-  case "$_raw_tag" in
-    __header__*) project="${_raw_tag#__header__}" ;;
-    __dead__*)
-      local s="${_raw_tag#__dead__}"
-      project=$(printf '%s' "$s" | cut -d'@' -f2 | cut -d'/' -f1)
+  # Collapse key is the tmux session name (aid@<name>).
+  local key
+  case "$_tag" in
+    session:*) key="${_tag#session:}" ;;
+    dead:*)    key="${_tag#dead:}" ;;
+    conv:*)
+      local rest="${_tag#conv:}"
+      key="${rest#*:}"   # tmux_session part
       ;;
-    *) project=$(printf '%s' "$_raw_tag" | cut -d'@' -f2 | cut -d'/' -f1) ;;
+    noconv:*)  key="${_tag#noconv:}" ;;
+    *) return 0 ;;
   esac
-  [[ -z "$project" ]] && return 0
+  [[ -z "$key" ]] && return 0
 
-  if grep -qxF "$project" "$collapse_file" 2>/dev/null; then
-    grep -vxF "$project" "$collapse_file" > "${collapse_file}.tmp" \
+  if grep -qxF "$key" "$collapse_file" 2>/dev/null; then
+    grep -vxF "$key" "$collapse_file" > "${collapse_file}.tmp" \
       && mv "${collapse_file}.tmp" "$collapse_file" || true
   else
-    printf '%s\n' "$project" >> "$collapse_file"
+    printf '%s\n' "$key" >> "$collapse_file"
   fi
 }
 

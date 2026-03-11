@@ -1,22 +1,23 @@
 #!/usr/bin/env bash
 # aid-sessions-list — emit the fzf input list for aid-sessions.
 #
+# Layout:
+#   aid@my-project  [live]  /path/to/repo        ← session header
+#     > Conv title                   3m ago       ← active opencode conversation
+#       Another conversation        14m ago
+#   aid@other-proj  [dead]                        ← dead session header
+#
 # Each output line is tab-delimited:
-#   DISPLAY_TEXT \t SESSION_TAG
+#   DISPLAY_TEXT \t TAG
 #
-# Where SESSION_TAG is one of:
-#   [aid@<project>/<slug>]         — live session
-#   [__dead__aid@<project>/<slug>] — dead session (in metadata, not in tmux)
-#   [__header__<project>]          — non-selectable project group header
+# TAG values:
+#   [session:aid@<name>]         — session header (selectable: switch to it)
+#   [dead:aid@<name>]            — dead session header
+#   [conv:<session_id>:<tmux_session>]  — opencode conversation
+#   [noconv:<tmux_session>]      — placeholder when no conversations found
 #
-# Collapse state is read from AID_SESSIONS_COLLAPSE (a file listing collapsed
-# project names, one per line). Collapsed projects emit only the header line.
-#
-# Env:  AID_DATA          path to aid data dir (~/.local/share/aid by default)
-#       AID_DIR           path to aid install dir
-#       AID_SESSIONS_COLLAPSE  path to collapse state file (tmpfile, optional)
-#
-# This script is called by aid-sessions via fzf reload() to refresh the list.
+# Collapse state: AID_SESSIONS_COLLAPSE file, one session name per line.
+# Env: AID_DATA, AID_DIR, AID_SESSIONS_COLLAPSE
 
 set -euo pipefail
 
@@ -26,23 +27,20 @@ set -euo pipefail
 # shellcheck source=lib/sessions/aid-meta
 source "$AID_DIR/lib/sessions/aid-meta"
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 _collapse_file="${AID_SESSIONS_COLLAPSE:-}"
 _is_collapsed() {
-  local project="$1"
   [[ -n "$_collapse_file" && -f "$_collapse_file" ]] || return 1
-  grep -qxF "$project" "$_collapse_file" 2>/dev/null
+  grep -qxF "$1" "$_collapse_file" 2>/dev/null
 }
 
 _relative_time() {
   local ts="$1"
   [[ -z "$ts" || "$ts" == "null" ]] && printf 'unknown' && return
-  local now diff
+  local now epoch diff
   now=$(date +%s)
-  # Parse ISO8601 UTC timestamp to epoch.
-  local epoch
-  epoch=$(date -d "$ts" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || printf '0')
+  epoch=$(date -d "$ts" +%s 2>/dev/null \
+    || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null \
+    || printf '0')
   diff=$(( now - epoch ))
   if   (( diff < 60    )); then printf '%ds ago'  "$diff"
   elif (( diff < 3600  )); then printf '%dm ago'  "$(( diff / 60 ))"
@@ -51,94 +49,132 @@ _relative_time() {
   fi
 }
 
-# ── Build combined session list ───────────────────────────────────────────────
+# _opencode_conversations <repo_path> <active_session_id>
+# Print tab-separated lines: id \t title \t updated_epoch
+# Queries the opencode DB for sessions with directory matching repo_path.
+_opencode_conversations() {
+  local repo_path="$1" active_id="${2:-}"
+  command -v jq &>/dev/null || return 0
 
-# Live tmux sessions: aid@<project>/<slug>
-# Use $NF (last field) instead of $2 so sessions with a blank last_attached
-# timestamp (never attached) still yield the correct session name.
+  local db_path
+  db_path="$AID_DATA/opencode/opencode.db"
+  [[ -f "$db_path" ]] || return 0
+
+  # Query via opencode db (uses OPENCODE_CONFIG_DIR to locate the DB).
+  local json
+  json=$(OPENCODE_CONFIG_DIR="$AID_DIR/opencode" \
+    opencode db \
+    "SELECT id, title, time_updated/1000 as epoch FROM session WHERE directory='${repo_path}' ORDER BY time_updated DESC LIMIT 20;" \
+    --format json 2>/dev/null || true)
+  [[ -z "$json" || "$json" == "[]" ]] && return 0
+
+  printf '%s\n' "$json" | jq -r \
+    --arg active "$active_id" \
+    '.[] | [.id, .title, (.epoch | tostring)] | @tsv' \
+    2>/dev/null || true
+}
+
+# ── Build list ────────────────────────────────────────────────────────────────
+
+# Live aid@* sessions (aid@_bootstrap excluded), sorted by last_attached desc.
 mapfile -t _live < <(
-  tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \
-    | grep -E ' aid@[^/]+/[^/]+$' \
+  tmux -L aid list-sessions \
+    -F "#{session_last_attached} #{session_name}" 2>/dev/null \
+    | grep -E ' aid@[^_][^/]*$' \
     | sort -rn \
-    | awk '{print $NF}'
+    | awk '{print $NF}' \
+    || true
 )
 
-# Dead sessions from metadata (not in tmux).
+# Dead sessions from metadata not in tmux.
 mapfile -t _dead < <(
   _meta_all_sessions | while IFS= read -r s; do
     printf '%s\n' "${_live[@]:-}" | grep -qxF "$s" || printf '%s\n' "$s"
-  done || true
+  done 2>/dev/null || true
 )
 
-# Collect all projects (preserving live-first order, then dead).
-declare -A _seen_projects
-_ordered_projects=()
-for _s in "${_live[@]}" "${_dead[@]}"; do
-  [[ -z "$_s" ]] && continue  # skip empty entries from blank last_attached lines
-  _p=$(printf '%s' "$_s" | cut -d'@' -f2 | cut -d'/' -f1)
-  if [[ -z "${_seen_projects[$_p]:-}" ]]; then
-    _seen_projects[$_p]=1
-    _ordered_projects+=("$_p")
+# Currently active session in this client (for marking).
+_current=$(tmux -L aid display-message -p "#{session_name}" 2>/dev/null || true)
+
+# ── Emit live sessions ────────────────────────────────────────────────────────
+for _session in "${_live[@]}"; do
+  [[ -z "$_session" ]] && continue
+  _name="${_session#aid@}"
+  _repo=$(_meta_get "$_session" "repo_path")
+  _branch=$(_meta_get "$_session" "branch")
+
+  # Active session marker.
+  _marker='  '
+  [[ "$_session" == "$_current" ]] && _marker='▶ '
+
+  # Collapse toggle.
+  _collapsed=0
+  _is_collapsed "$_session" && _collapsed=1
+
+  if (( _collapsed )); then
+    printf '%s▶ aid@%s  \033[2m[live]\033[0m%s\t[session:%s]\n' \
+      "$_marker" "$_name" \
+      "${_repo:+  ${_repo}${_branch:+  (${_branch})}}" \
+      "$_session"
+    continue
+  fi
+
+  printf '%s\033[1maid@%s\033[0m  \033[32m[live]\033[0m%s\t[session:%s]\n' \
+    "$_marker" "$_name" \
+    "${_repo:+  \033[2m${_repo}${_branch:+  (${_branch})}\033[0m}" \
+    "$_session"
+
+  # Conversations under this session.
+  if [[ -n "$_repo" ]]; then
+    # Get currently loaded session ID from the opencode pane title or env (best-effort).
+    _active_conv_id=$(tmux -L aid show-environment -t "$_session" AID_ORC_ACTIVE_CONV 2>/dev/null \
+      | cut -d= -f2- || true)
+
+    local_done=0
+    while IFS=$'\t' read -r _cid _ctitle _cepoch; do
+      [[ -z "$_cid" ]] && continue
+      local_done=1
+      _age='unknown'
+      if [[ -n "$_cepoch" && "$_cepoch" != "null" && "$_cepoch" != "0" ]]; then
+        _now=$(date +%s)
+        _diff=$(( _now - _cepoch ))
+        if   (( _diff < 60    )); then _age="${_diff}s ago"
+        elif (( _diff < 3600  )); then _age="$(( _diff / 60 ))m ago"
+        elif (( _diff < 86400 )); then _age="$(( _diff / 3600 ))h ago"
+        else                          _age="$(( _diff / 86400 ))d ago"
+        fi
+      fi
+
+      _conv_marker='  '
+      [[ "$_cid" == "$_active_conv_id" ]] && _conv_marker='▶ '
+
+      # Truncate title to 48 chars.
+      _short=$(printf '%.48s' "$_ctitle")
+      [[ "${#_ctitle}" -gt 48 ]] && _short="${_short}…"
+
+      printf '    %s%-50s \033[2m%s\033[0m\t[conv:%s:%s]\n' \
+        "$_conv_marker" "$_short" "$_age" "$_cid" "$_session"
+    done < <(_opencode_conversations "$_repo" "$_active_conv_id")
+
+    if [[ "$local_done" -eq 0 ]]; then
+      printf '    \033[2m(no conversations yet)\033[0m\t[noconv:%s]\n' "$_session"
+    fi
+  else
+    printf '    \033[2m(no repo metadata)\033[0m\t[noconv:%s]\n' "$_session"
   fi
 done
 
-# ── Emit lines ────────────────────────────────────────────────────────────────
+# ── Emit dead sessions ────────────────────────────────────────────────────────
+for _session in "${_dead[@]}"; do
+  [[ -z "$_session" ]] && continue
+  _name="${_session#aid@}"
+  _repo=$(_meta_get "$_session" "repo_path")
+  _branch=$(_meta_get "$_session" "branch")
+  _last=$(_meta_get "$_session" "last_active")
+  _age=$(_relative_time "$_last")
 
-_current_session=$(tmux -L aid display-message -p "#{session_name}" 2>/dev/null || true)
-
-for _project in "${_ordered_projects[@]}"; do
-  _collapsed=0
-  _is_collapsed "$_project" && _collapsed=1
-
-  # Project header line — always emitted.
-  if (( _collapsed )); then
-    printf '▶ %s/\t[__header__%s]\n' "$_project" "$_project"
-  else
-    printf '▼ %s/\t[__header__%s]\n' "$_project" "$_project"
-  fi
-
-  (( _collapsed )) && continue
-
-  # ── Live sessions for this project ──
-  for _session in "${_live[@]}"; do
-    _sp=$(printf '%s' "$_session" | cut -d'@' -f2 | cut -d'/' -f1)
-    [[ "$_sp" == "$_project" ]] || continue
-    _slug=$(printf '%s' "$_session" | cut -d'/' -f2)
-
-    # Activity from pane_last_used.
-    _activity=$(tmux -L aid list-panes -t "$_session" \
-      -F "#{pane_last_used}" 2>/dev/null | head -1 || printf '0')
-    _now=$(date +%s)
-    _diff=$(( _now - _activity ))
-    if   (( _diff < 60   )); then _status='● running'
-    elif (( _diff < 3600 )); then _status='○ idle   '
-    else                          _status='○ idle   '
-    fi
-    _age=$(_relative_time "$(date -u -d "@${_activity}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
-      || date -u -r "${_activity}" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || true)")
-
-    _branch=$(_meta_get "$_session" "branch")
-    [[ -n "$_branch" ]] && _branch_str=" ($_branch)" || _branch_str=""
-
-    _active_marker='  '
-    [[ "$_session" == "$_current_session" ]] && _active_marker='▶ '
-
-    printf '  %s%-22s%s  %s  %s\t[%s]\n' \
-      "$_active_marker" "$_slug" "$_branch_str" "$_status" "$_age" "$_session"
-  done
-
-  # ── Dead sessions for this project ──
-  for _session in "${_dead[@]}"; do
-    _sp=$(printf '%s' "$_session" | cut -d'@' -f2 | cut -d'/' -f1)
-    [[ "$_sp" == "$_project" ]] || continue
-    _slug=$(printf '%s' "$_session" | cut -d'/' -f2)
-
-    _branch=$(_meta_get "$_session" "branch")
-    [[ -n "$_branch" ]] && _branch_str=" ($_branch)" || _branch_str=""
-    _last=$(_meta_get "$_session" "last_active")
-    _age=$(_relative_time "$_last")
-
-    printf '  ~ %-21s%s  ✗ dead    %s\t[__dead__%s]\n' \
-      "$_slug" "$_branch_str" "$_age" "$_session"
-  done
+  printf '  \033[2maid@%s  [dead]  %s%s\033[0m\t[dead:%s]\n' \
+    "$_name" "$_age" \
+    "${_repo:+  ${_repo}${_branch:+  (${_branch})}}" \
+    "$_session"
 done

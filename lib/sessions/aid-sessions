@@ -289,27 +289,47 @@ _do_delete() {
       ;;
   esac
 
-  # Confirmation prompt.
-  local _prompt_label
-  if [[ "$_mode" == "conv" ]]; then
-    _prompt_label="delete conversation from ${_tmux_session}?"
-  else
-    _prompt_label="delete ALL conversations in ${_tmux_session}?"
-  fi
-  _dbg DEL "confirm prompt: ${_prompt_label}"
+  # Confirmation prompt — native tmux floating menu (no typing required).
+  # display-menu writes the chosen answer to a fifo; we block-read it.
+  local _fifo _answer
+  _fifo=$(mktemp -u /tmp/aid-del-XXXXXX)
+  mkfifo "$_fifo"
 
-  local confirm
-  confirm=$(fzf --no-info \
-      --no-sort \
-      --height=5 \
-      --border=rounded \
-      --prompt="  ${_prompt_label} " \
-      --color='border:238,prompt:yellow' \
-      --bind="start:reload(printf 'no\nyes')" \
-      < /dev/null \
-    || true)
-  if [[ "$confirm" != "yes" ]]; then
-    _dbg DEL "delete cancelled (confirm='${confirm:-<empty>}')"
+  local _menu_title
+  if [[ "$_mode" == "conv" ]]; then
+    _menu_title="Delete this conversation?"
+  else
+    _menu_title="Delete ALL conversations in ${_tmux_session}?"
+  fi
+  _dbg DEL "confirm menu: ${_menu_title}"
+
+  # -E: close popup when command exits (not used here — display-menu, not popup)
+  # Menu items: label  shortcut  command
+  # On "Yes": write "yes" into fifo. On "No"/dismiss: write "no".
+  # We must also handle the user pressing Escape (menu dismissed without
+  # choosing) — a background writer sends "no" after a short delay if the
+  # fifo is never written to by the menu command.
+  (
+    sleep 2
+    printf 'no\n' > "$_fifo" 2>/dev/null || true
+  ) &
+  local _guard_pid=$!
+
+  tmux -L aid display-menu \
+    -T " $( printf '%s' "$_menu_title" ) " \
+    -x C -y C \
+    "Yes" "y" "run-shell 'printf yes > $(printf '%q' "$_fifo")'" \
+    "No"  "n" "run-shell 'printf no  > $(printf '%q' "$_fifo")'" \
+    2>/dev/null || true
+
+  # Block until the menu writes its answer (or the guard fires).
+  _answer=$(cat "$_fifo" 2>/dev/null || true)
+  kill "$_guard_pid" 2>/dev/null || true
+  rm -f "$_fifo"
+
+  _dbg DEL "confirm answer='${_answer:-<empty>}'"
+  if [[ "$_answer" != "yes" ]]; then
+    _dbg DEL "delete cancelled"
     return 0
   fi
 

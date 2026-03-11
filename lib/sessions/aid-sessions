@@ -493,16 +493,24 @@ _dbg INIT "vars ready: act/lst/rld/dbglog set"
   done
 ) &
 _ticker_pid=$!
-trap 'kill "$_ticker_pid" 2>/dev/null || true; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
+# Tempfile used to pass FZF_POS back to the shell after fzf exits.
+# fzf does not expose FZF_POS to the parent shell after exit; the enter/n/r/d
+# binds write the current position here (via execute-silent) just before
+# accept/abort so we can restore the cursor to the same row on reopen.
+_FZF_POS_FILE=$(mktemp /tmp/aid-fzf-pos-XXXXXX)
+
+trap 'kill "$_ticker_pid" 2>/dev/null || true; rm -f "$_FZF_POS_FILE"; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 
 # ── fzf loop ──────────────────────────────────────────────────────────────────
 # Instead of exec-ing back into aid-sessions on every action (which orphans the
 # ticker above), we loop here.  fzf is restarted inside this process; the ticker
 # keeps running against the same port.
 #
-# _start_pos: cursor row to restore when fzf reopens after a rename/delete/etc.
-# Defaults to 1; set to the last known FZF_POS before fzf exits so the user
-# lands near where they were (Bug 4 fix).
+# _start_pos: cursor row to restore when fzf reopens after an action.
+# fzf does not expose FZF_POS to the parent shell after exit, so we capture it
+# by writing $FZF_POS to _FZF_POS_FILE inside the enter/n/r/d execute-silent
+# binds (which run before accept/abort).  After fzf exits we read it back.
+# Defaults to 1 on first open and on any action that intentionally resets pos.
 _start_pos=1
 
 while true; do
@@ -566,6 +574,7 @@ while true; do
     --bind "enter:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s KEY   enter FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
     )+accept" \
     --bind "esc:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
@@ -578,14 +587,17 @@ while true; do
     --bind "n:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s ACTN  n (new session) FZF_POS=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
     )" \
     --bind "r:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s ACTN  r (rename) FZF_POS=%s tag={2}\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
     )" \
     --bind "d:execute-silent(
       _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
       [[ -n ${_dbglog} ]] && printf '%s ACTN  d (delete) FZF_POS=%s tag={2}\n' \"\$_ms\" \"\${FZF_POS:-?}\" >> ${_dbglog}
+      printf '%s' \"\${FZF_POS:-1}\" > $(printf '%q' "$_FZF_POS_FILE")
     )" \
     2>/dev/null \
     || true)
@@ -593,16 +605,23 @@ while true; do
   _key=$(printf '%s\n' "$_output" | head -1)
   _tag=$(printf '%s\n' "$_output" | tail -n +2 | tr -d '[]')
 
-  _dbg KEY "fzf exited key='${_key:-enter}' tag='${_tag:-}' pos=${_start_pos}"
+  # Restore cursor position: read FZF_POS written by the enter/n/r/d bind
+  # (execute-silent runs before accept/abort so the file is ready here).
+  # Fall back to 1 if the file is empty or missing (first open, esc/q quit).
+  _start_pos=$(cat "$_FZF_POS_FILE" 2>/dev/null || true)
+  : "${_start_pos:=1}"
+  # Reset the file so a subsequent esc/q doesn't reuse a stale position.
+  printf '' > "$_FZF_POS_FILE"
 
-  # Default: reopen at row 1 unless overridden below.
-  _start_pos=1
+  _dbg KEY "fzf exited key='${_key:-enter}' tag='${_tag:-}' pos=${_start_pos}"
 
   case "$_key" in
     n)
       _dbg ACTN "n: calling orchestrator.sh --new"
       "$AID_DIR/lib/orchestrator.sh" --new || true
       _dbg ACTN "n: orchestrator.sh --new returned"
+      # New session: reset to top so the new entry is visible.
+      _start_pos=1
       continue
       ;;
     r)
@@ -610,7 +629,7 @@ while true; do
       _do_rename "$_tag"
       # Force terminal repaint after the fzf prompt closed over it.
       tput reset 2>/dev/null || true
-      _start_pos=1
+      # Keep _start_pos from the bind so the cursor stays near the renamed item.
       continue
       ;;
     d)
@@ -618,7 +637,7 @@ while true; do
       _do_delete "$_tag"
       # Force the terminal to repaint after display-menu closed over it.
       tput reset 2>/dev/null || true
-      _start_pos=1
+      # Keep _start_pos; the deleted item disappears but the cursor stays nearby.
       continue
       ;;
   esac

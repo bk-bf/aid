@@ -227,10 +227,11 @@ _dbg INIT "vars ready: act/lst/rld/dbglog set"
       "$_ms" "${_fzf_port}" >> "${AID_DEBUG_LOG}"
   fi
   sleep 2
+  # Fire an immediate reload right after warmup (tick=0) so opencode
+  # conversations appear as soon as the HTTP port is ready (~1-2s after
+  # launch), rather than waiting for the first regular tick at +7s.
   _tick=0
   while true; do
-    sleep 5
-    _tick=$(( _tick + 1 ))
     _rc=0
     curl -sf --max-time 1 \
       -X POST \
@@ -240,11 +241,13 @@ _dbg INIT "vars ready: act/lst/rld/dbglog set"
     if [[ -n "${AID_DEBUG_LOG:-}" ]]; then
       _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
       if [[ "$_rc" -ne 0 ]]; then
-        printf '%s ERR   ticker curl failed (rc=%s, port=%s)\n' "$_ms" "$_rc" "${_fzf_port}" >> "${AID_DEBUG_LOG}"
+        printf '%s ERR   ticker curl failed (rc=%s, port=%s, tick=%s)\n' "$_ms" "$_rc" "${_fzf_port}" "$_tick" >> "${AID_DEBUG_LOG}"
       else
         printf '%s HTTP  ticker POST ok (tick=%s)\n' "$_ms" "$_tick" >> "${AID_DEBUG_LOG}"
       fi
     fi
+    _tick=$(( _tick + 1 ))
+    sleep 5
   done
 ) &
 _ticker_pid=$!
@@ -268,6 +271,10 @@ while true; do
   _dbg STDIN "running list command before fzf open (start_pos=${_start_pos})"
   _initial_list=$(eval "$_lst" 2>/dev/null || true)
   _initial_lines=$(printf '%s' "$_initial_list" | wc -l)
+  # Detect if opencode HTTP ports weren't ready yet (noconv: placeholders present).
+  if printf '%s' "$_initial_list" | grep -q '\[noconv:'; then
+    _dbg STDIN "list has noconv: entries — opencode port(s) not ready yet; ticker will fix at +2s"
+  fi
   _dbg STDIN "list ready: ${_initial_lines} lines"
 
   _output=$(printf '%s\n' "$_initial_list" | fzf \

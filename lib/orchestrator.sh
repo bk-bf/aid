@@ -160,7 +160,7 @@ spawn_orc_session() {
   local _orc_label=" ${project}/${slug} "
   local _vimbridge_l="#(cat \#{socket_path}-\#{session_id}-vimbridge)"
   local _vimbridge_r="#(cat \#{socket_path}-\#{session_id}-vimbridge-R)"
-  tmux -L aid set-hook -t "$session" window-focus \
+  tmux -L aid set-hook -t "$session" after-select-window \
     "if-shell '[ \"#{window_name}\" = nvim ]' \
        'set-option -t $(printf '%q' "$session") status-left $(printf '%q' "$_vimbridge_l") ; set-option -t $(printf '%q' "$session") status-right $(printf '%q' "$_vimbridge_r")' \
        'set-option -t $(printf '%q' "$session") status-left $(printf '%q' "$_orc_label") ; set-option -t $(printf '%q' "$session") status-right \"\"'"

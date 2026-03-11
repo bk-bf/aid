@@ -168,11 +168,17 @@ _do_toggle_collapse() {
 case "$_action" in
   rename|delete)
     if [[ "${AID_IN_ACTION_POPUP:-0}" -ne 1 ]]; then
-      _client="${AID_CALLER_CLIENT:-}"
+      # Only pass -c when AID_CALLER_CLIENT is a known client of the aid server.
+      _client=""
+      if [[ -n "${AID_CALLER_CLIENT:-}" ]] && \
+         tmux -L aid list-clients -F "#{client_tty}" 2>/dev/null \
+           | grep -qxF "$AID_CALLER_CLIENT"; then
+        _client="$AID_CALLER_CLIENT"
+      fi
       _c_flag=()
       [[ -n "$_client" ]] && _c_flag=(-c "$_client")
       tmux -L aid display-popup -E -w 72 -h 10 "${_c_flag[@]}" \
-        "AID_IN_ACTION_POPUP=1 AID_CALLER_CLIENT=$(printf '%q' "${_client:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "${AID_SESSIONS_COLLAPSE:-}") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action") $(printf '%q' "$_action") $(printf '%q' "$_line")"
+        "AID_IN_ACTION_POPUP=1 AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") AID_SESSIONS_COLLAPSE=$(printf '%q' "${AID_SESSIONS_COLLAPSE:-}") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action") $(printf '%q' "$_action") $(printf '%q' "$_line")"
       exit 0
     fi
     ;;

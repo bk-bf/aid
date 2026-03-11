@@ -40,8 +40,15 @@ trap 'rm -f "$AID_SESSIONS_COLLAPSE"' EXIT
 _switch() {
   local session="$1"
   if [[ -n "${TMUX:-}" ]]; then
-    if [[ -n "${AID_CALLER_CLIENT:-}" ]]; then
-      tmux -L aid switch-client -c "$AID_CALLER_CLIENT" -t "$session"
+    # Only use -c when AID_CALLER_CLIENT is a known client of the aid server.
+    local _c
+    if [[ -n "${AID_CALLER_CLIENT:-}" ]] && \
+       tmux -L aid list-clients -F "#{client_tty}" 2>/dev/null \
+         | grep -qxF "$AID_CALLER_CLIENT"; then
+      _c="$AID_CALLER_CLIENT"
+    fi
+    if [[ -n "${_c:-}" ]]; then
+      tmux -L aid switch-client -c "$_c" -t "$session"
     else
       tmux -L aid switch-client -t "$session"
     fi

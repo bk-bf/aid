@@ -33,6 +33,16 @@ set -euo pipefail
 # shellcheck source=lib/sessions/aid-meta
 source "$AID_DIR/lib/sessions/aid-meta"
 
+# ── Debug logging ─────────────────────────────────────────────────────────────
+# Writes timestamped events to AID_DEBUG_LOG when set (i.e. aid -d was used).
+# Format: "<unix_ms> <CATEGORY> <message>"
+_dbg() {
+  [[ -z "${AID_DEBUG_LOG:-}" ]] && return 0
+  local cat="$1"; shift
+  local ms; ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+  printf '%s %s %s\n' "$ms" "$cat" "$*" >> "$AID_DEBUG_LOG"
+}
+
 # ── Mouse reset trap ──────────────────────────────────────────────────────────
 # Prevents terminal corruption when fzf exits abnormally.
 trap 'printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
@@ -64,6 +74,8 @@ if [[ -n "${TMUX_PANE:-}" ]]; then
     fi
   fi
 fi
+
+_dbg INIT "aid-sessions starting (pid=$$, pane=${TMUX_PANE:-?}, port will be assigned below)"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -186,9 +198,13 @@ fi
 # Auto-refresh port: pick a free port for fzf --listen so the background
 # ticker can send reload commands without restarting fzf.
 _fzf_port=$(( 49200 + RANDOM % 1000 ))
+_dbg INIT "fzf --listen port=${_fzf_port}"
 
 _act="AID_CALLER_CLIENT=$(printf '%q' "${AID_CALLER_CLIENT:-}") AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") TMUX=$(printf '%q' "${TMUX:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-action")"
 _lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-list")"
+_dbglog=$(printf '%q' "${AID_DEBUG_LOG:-}")
+
+_dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
 
 # Background auto-refresh: every 5 s send a reload command to fzf via --listen.
 # Use transform so we can read $FZF_POS before reloading and restore it after,
@@ -196,13 +212,30 @@ _lst="AID_DATA=$(printf '%q' "$AID_DATA") AID_DIR=$(printf '%q' "$AID_DIR") $(pr
 (
   # Give fzf a moment to start and bind to the port.
   sleep 2
+  _tick=0
   while true; do
     sleep 5
+    _tick=$(( _tick + 1 ))
+    _rc=0
     curl -sf --max-time 1 \
       -X POST \
       "http://127.0.0.1:${_fzf_port}" \
-      -d "transform:echo \"reload(${_lst} 2>/dev/null || true)+pos(\${FZF_POS:-1})\"" \
-      >/dev/null 2>&1 || true
+      -d "transform:
+        _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+        _pos=\${FZF_POS:-1}
+        _mc=\${FZF_MATCH_COUNT:-?}
+        [[ -n ${_dbglog} ]] && printf '%s TICK  tick=${_tick} FZF_POS=%s match_count=%s -> reload+pos(%s)\n' \"\$_ms\" \"\$_pos\" \"\$_mc\" \"\$_pos\" >> ${_dbglog}
+        echo \"reload(${_lst} 2>/dev/null || true)+pos(\${_pos})\"
+      " \
+      >/dev/null 2>&1 || _rc=$?
+    if [[ -n "${AID_DEBUG_LOG:-}" ]]; then
+      _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+      if [[ "$_rc" -ne 0 ]]; then
+        printf '%s ERR   ticker curl failed (rc=%s, port=%s)\n' "$_ms" "$_rc" "${_fzf_port}" >> "${AID_DEBUG_LOG}"
+      else
+        printf '%s HTTP  ticker POST ok (tick=%s)\n' "$_ms" "$_tick" >> "${AID_DEBUG_LOG}"
+      fi
+    fi
   done
 ) &
 _ticker_pid=$!
@@ -233,8 +266,27 @@ _output=$(printf '' | fzf \
   --preview-window='right:45%:wrap:border-left:hidden' \
   --preview-label=' info ' \
   --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
-  --bind "start:reload(${_lst} 2>/dev/null || true)" \
-  --bind "ctrl-r:transform:echo \"reload(${_lst} 2>/dev/null || true)+pos(\${FZF_POS:-1})\"" \
+  --bind "start:transform:
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s INIT  start event fired -> reload (no pos yet)\n' \"\$_ms\" >> ${_dbglog}
+    echo 'reload(${_lst} 2>/dev/null || true)'
+  " \
+  --bind "ctrl-r:transform:
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    _pos=\${FZF_POS:-1}
+    [[ -n ${_dbglog} ]] && printf '%s KEY   ctrl-r manual refresh FZF_POS=%s -> reload+pos(%s)\n' \"\$_ms\" \"\$_pos\" \"\$_pos\" >> ${_dbglog}
+    echo \"reload(${_lst} 2>/dev/null || true)+pos(\${_pos})\"
+  " \
+  --bind "focus:transform:
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s POS   focus event FZF_POS=%s FZF_ACTION=%s item={}\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}
+    true
+  " \
+  --bind "load:transform:
+    _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
+    [[ -n ${_dbglog} ]] && printf '%s RELOAD load event fired FZF_POS=%s FZF_MATCH_COUNT=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_MATCH_COUNT:-?}\" >> ${_dbglog}
+    true
+  " \
   --bind "esc:abort" \
   --bind "q:abort" \
   2>/dev/null \
@@ -242,6 +294,8 @@ _output=$(printf '' | fzf \
 
 _key=$(printf '%s\n' "$_output" | head -1)
 _tag=$(printf '%s\n' "$_output" | tail -n +2 | tr -d '[]')
+
+_dbg KEY "fzf exited key='${_key:-enter}' tag='${_tag:-}'"
 
 case "$_key" in
   n)

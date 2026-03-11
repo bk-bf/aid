@@ -100,7 +100,9 @@ spawn_orc_session() {
   dbg "spawning session=$session repo=$repo_path"
 
   # Per-session nvim socket.
-  local safe_name nvim_socket
+  local safe_name nvim_socket debug_log dbg_pane
+  debug_log=""
+  dbg_pane=""
   safe_name=$(printf '%s' "$name" | tr '/' '-')
   nvim_socket="/tmp/aid-nvim-${safe_name}.sock"
 
@@ -129,20 +131,37 @@ spawn_orc_session() {
   tmux -L aid set-environment -t "$session" AID_ORC_REPO      "$repo_path"
   tmux -L aid set-environment -t "$session" AID_ORC_PORT      "$orc_port"
 
-  # ── Build the 2-pane layout ──
-  # Window 0 starts with a single pane.  We split it into two columns:
+  # ── Build the 2-pane layout (or 3-pane in debug mode) ──
+  # Window 0 starts with a single pane.  We split it into columns:
   #   nav (left ~25%) | opencode (right ~75%)
+  # In debug mode a third pane is appended to the right of opencode:
+  #   nav (~20%) | opencode (~55%) | debug (~25%)
   #
   # Initial pane → will become the navigator (left).
   local nav_pane
   nav_pane=$(tmux -L aid list-panes -t "$session" -F "#{pane_id}" | head -1)
 
-  # Split right from nav: this becomes opencode (75% of total).
+  # Split right from nav: this becomes opencode (75% of total, or ~55% in debug mode).
+  local orc_width="75%"
+  [[ "${AID_DEBUG:-0}" -eq 1 ]] && orc_width="55%"
   local orc_pane
   orc_pane=$(tmux -L aid split-window -h -t "$nav_pane" -P -F "#{pane_id}" \
-    -l "75%" -- sleep infinity)
+    -l "$orc_width" -- sleep infinity)
 
   dbg "nav=$nav_pane orc=$orc_pane"
+
+  # In debug mode: split a third pane to the right of opencode for the live log.
+  local dbg_pane=""
+  local debug_log=""
+  if [[ "${AID_DEBUG:-0}" -eq 1 ]]; then
+    debug_log="${AID_DATA}/debug/aid-sessions-${name}.log"
+    mkdir -p "$(dirname "$debug_log")"
+    : > "$debug_log"
+    dbg_pane=$(tmux -L aid split-window -h -t "$orc_pane" -P -F "#{pane_id}" \
+      -l "31%" -- sleep infinity)
+    tmux -L aid set-environment -t "$session" AID_DEBUG_LOG "$debug_log"
+    dbg "dbg_pane=$dbg_pane debug_log=$debug_log"
+  fi
 
   # Store pane IDs in session env so aid-sessions can find the opencode pane.
   tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE "$nav_pane"
@@ -154,8 +173,17 @@ spawn_orc_session() {
     "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
 
   # Start the navigator in the left pane (aid-sessions: fzf-based navigator).
+  local nav_env
+  nav_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}")"
+  [[ -n "$debug_log" ]] && nav_env+=" AID_DEBUG_LOG=$(printf '%q' "$debug_log")"
   tmux -L aid respawn-pane -k -t "$nav_pane" \
-    "AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions")"
+    "${nav_env} $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions")"
+
+  # Start the debug log viewer if in debug mode.
+  if [[ -n "$dbg_pane" && -n "$debug_log" ]]; then
+    tmux -L aid respawn-pane -k -t "$dbg_pane" \
+      "AID_DEBUG_LOG=$(printf '%q' "$debug_log") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-debug")"
+  fi
 
   # ── Window 1: nvim ──
   tmux -L aid new-window -t "$session" -n "nvim" -c "$repo_path"

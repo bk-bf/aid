@@ -393,7 +393,7 @@ while true; do
   case "$_key" in
     n)
       _dbg ACTN "n: spawning new session"
-      "$AID_DIR/lib/orchestrator.sh" --new
+      "$AID_DIR/lib/orchestrator.sh" --new || true
       continue
       ;;
     r)
@@ -428,7 +428,7 @@ while true; do
       _name="${_dead_session#aid@}"
       _dbg ACTN "enter: resurrect dead session ${_dead_session} repo=${_repo:-<none>}"
       if [[ -d "${_repo:-}" ]]; then
-        "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo"
+        "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo" || true
         continue
       else
         _dbg ACTN "enter: repo missing for ${_dead_session}, cannot resurrect"

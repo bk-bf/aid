@@ -179,9 +179,15 @@ spawn_orc_session() {
 
   # Start opencode in the right pane with a fixed HTTP port so the navigator
   # can reach the /tui/select-session API without port discovery.
+  #
+  # XDG_DATA_HOME must be set INLINE here (not just as a global tmux env var)
+  # because respawn-pane inline commands do not inherit the global tmux
+  # environment.  Without it, opencode falls back to ~/.local/share/opencode
+  # and serves the user's entire conversation history across all projects,
+  # ignoring the per-branch isolation we want.
   _spawn_log "$debug_log" "respawn orc_pane=${orc_pane}: opencode --port ${orc_port} ${repo_path}"
   tmux -L aid respawn-pane -k -t "$orc_pane" \
-    "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
+    "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") XDG_DATA_HOME=$(printf '%q' "$AID_DATA") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
   _spawn_log "$debug_log" "orc_pane=${orc_pane} respawned (opencode)"
 
   # Start the navigator in the left pane (aid-sessions: fzf-based navigator).

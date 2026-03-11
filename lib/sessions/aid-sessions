@@ -37,17 +37,28 @@ source "$AID_DIR/lib/sessions/aid-meta"
 # Writes timestamped events to AID_DEBUG_LOG when set (i.e. aid -d was used).
 # Format: "<unix_ms> <CATEGORY> <message>"
 #
-# The logger runs as a setsid daemon — a separate process session entirely
-# outside the tmux pane's process group.  This means it keeps writing to the
-# log file even if the pane is killed (SIGHUP) or respawned mid-execution.
-# The main script sends lines to a named pipe; the daemon drains it to the file.
+# Architecture: pipe + subshell with trap '' HUP
+#   The drain subshell ignores SIGHUP so it survives `respawn-pane -k` (tmux
+#   sends SIGHUP to the pane process group on respawn).  It is still a child
+#   of this shell process, so it dies naturally when the tmux session is killed
+#   (kill-session sends SIGTERM/SIGKILL to the whole group).
+#
+#   setsid was considered but rejected: it fully detaches the subprocess from
+#   the tmux session, so it would survive even intentional kill-session — wrong.
+#
+# Why this exists (investigation history):
+#   The original _dbg wrote directly to the log file from within the same
+#   process as fzf.  When the script died (or the pane was killed), writes
+#   stopped immediately with no ERR entry, making the crash invisible.  The
+#   independent drain subshell keeps writing to the log even after the main
+#   process is gone.
 #
 # Startup:
-#   _dbg_init   — called once at top of script; starts daemon and sets _DBG_PIPE
+#   _dbg_init   — called once at top of script; creates FIFO and starts daemon
 # Runtime:
-#   _dbg CAT msg  — non-blocking write to the pipe (or direct file if no daemon)
+#   _dbg CAT msg  — writes to fd 9 (pipe write end); daemon drains to file
 # Teardown:
-#   daemon exits automatically when the write end of the pipe is closed (EOF)
+#   _dbg_close  — called from EXIT trap; closes fd 9 so daemon sees EOF + exits
 
 _DBG_PIPE=""
 _DBG_DAEMON_PID=""
@@ -103,6 +114,14 @@ trap '_dbg_close; printf "\033[?1000l\033[?1002l\033[?1006l"' EXIT
 # ERR trap: fires on any command that exits non-zero under set -e.
 # Writes the failing line number and last command to the log via the daemon
 # (or directly to the file if the daemon is gone) before the EXIT trap fires.
+#
+# NOTE: fzf exits with rc=1 when the user presses q/esc (abort with no
+# selection).  The fzf invocation uses `|| true` so that rc=1 does NOT
+# propagate to the enclosing _output=$(...) assignment — the assignment itself
+# succeeds with rc=0 and this trap does NOT fire for normal quit.  If you see
+# an ERR entry in the log with the fzf command, it means the script was killed
+# externally (e.g. tmux killed the pane) after fzf exited, not a real crash.
+#
 # shellcheck disable=SC2154  # vars assigned inside the trap string
 trap '
   _err_rc=$?
@@ -249,6 +268,13 @@ _switch_to_session() {
 }
 
 _load_conversation() {
+  # Dense _dbg CONV logging around every statement here is intentional.
+  # Historical context: this function was the site of a silent crash — fzf
+  # died after Enter on a conv: item with no error in the log.  The root
+  # cause turned out to be `tmux set-environment` returning non-zero under
+  # certain conditions, which under set -euo pipefail killed the script.
+  # That command now has `|| { ... }` so it is safe, but the logging stays
+  # so that any future regression is immediately pinpointed.
   local conv_id="$1" tmux_session="$2"
 
   # Get the opencode HTTP port for this session.

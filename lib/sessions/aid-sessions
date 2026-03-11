@@ -393,7 +393,8 @@ while true; do
   case "$_key" in
     n)
       _dbg ACTN "n: spawning new session"
-      exec "$AID_DIR/lib/orchestrator.sh" --new
+      "$AID_DIR/lib/orchestrator.sh" --new
+      continue
       ;;
     r)
       _dbg ACTN "r: rename tag='${_tag:-}'"
@@ -427,7 +428,8 @@ while true; do
       _name="${_dead_session#aid@}"
       _dbg ACTN "enter: resurrect dead session ${_dead_session} repo=${_repo:-<none>}"
       if [[ -d "${_repo:-}" ]]; then
-        exec "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo"
+        "$AID_DIR/lib/orchestrator.sh" --resurrect "$_name" "$_repo"
+        continue
       else
         _dbg ACTN "enter: repo missing for ${_dead_session}, cannot resurrect"
         echo "aid-sessions: repo '${_repo}' no longer exists for $_dead_session" >&2

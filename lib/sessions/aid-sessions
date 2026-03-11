@@ -210,7 +210,7 @@ _dbglog=$(printf '%q' "${AID_DEBUG_LOG:-}")
 # Quoted invocation of the reload helper — shared by ticker and ctrl-r.
 # The helper reads FZF_POS / FZF_MATCH_COUNT from its env (set by fzf) and
 # emits a reload-sync+pos action string to stdout.
-_rld="AID_DEBUG_LOG=${_dbglog} $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
+_rld="AID_DEBUG_LOG=${_dbglog} AID_SESSIONS_LST=$(printf '%q' "${_lst}") $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions-reload")"
 # start: bind — reload without a position (cursor starts at top on initial load).
 # Pre-computed to keep shellcheck happy (it can't parse fzf action syntax).
 _bind_start="start:transform:
@@ -235,7 +235,7 @@ _dbg INIT "fzf port range start, _fzf_port will be 49200+RANDOM%1000"
     curl -sf --max-time 1 \
       -X POST \
       "http://127.0.0.1:${_fzf_port}" \
-      -d "transform:${_rld} tick=${_tick} ${_lst}" \
+      -d "transform:${_rld} tick=${_tick}" \
       >/dev/null 2>&1 || _rc=$?
     if [[ -n "${AID_DEBUG_LOG:-}" ]]; then
       _ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
@@ -276,7 +276,7 @@ _output=$(printf '' | fzf \
   --preview-label=' info ' \
   --color='border:238,label:blue,preview-border:238,preview-label:blue,header:italic:242,prompt:blue,pointer:blue,hl:cyan,hl+:cyan' \
   --bind "$_bind_start" \
-  --bind "ctrl-r:transform:${_rld} ctrl-r ${_lst}" \
+  --bind "ctrl-r:transform:${_rld} ctrl-r" \
   --bind "focus:execute-silent:
     _ms=\$(date +%s%3N 2>/dev/null || printf '%s000' \"\$(date +%s)\")
     [[ -n ${_dbglog} ]] && printf '%s POS   focus FZF_POS=%s FZF_ACTION=%s\n' \"\$_ms\" \"\${FZF_POS:-?}\" \"\${FZF_ACTION:-?}\" >> ${_dbglog}

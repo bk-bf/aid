@@ -4,30 +4,56 @@
 # Called from aid-sessions fzf transform: binds (ticker and ctrl-r) so the
 # logic lives in exactly one place.
 #
-# Env (set by fzf when spawning transform shells):
-#   FZF_POS           — 1-based cursor row in the current list
-#   FZF_MATCH_COUNT   — total visible items
+# Env (all required — set by the caller via the transform: body):
+#   FZF_POS           — 1-based cursor row (set by fzf when spawning transform shells)
+#   FZF_MATCH_COUNT   — total visible items (set by fzf)
+#   AID_SESSIONS_LST  — shell command string that generates the fzf list
 #   AID_DEBUG_LOG     — path to debug log (optional)
 #
 # Positional args:
-#   $1  label   — short string identifying the caller (e.g. "tick=3" or "ctrl-r")
-#   $2  lst_cmd — the shell command that generates the fzf list (already quoted)
+#   $1  label  — short string identifying the caller (e.g. "tick=3" or "ctrl-r")
 #
 # Log categories emitted:
-#   SYNC  — reload-sync dispatched (with timing of list generation)
-#   ERR   — list command failed
+#   SYNC  — reload-sync dispatched (label, FZF_POS, match_count, line count)
+#   ERR   — AID_SESSIONS_LST not set, or list command returned empty output
 
 set -euo pipefail
 
 _label="${1:?label required}"
-_lst="${2:?list command required}"
 
-_ms_start=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+_ms=$(date +%s%3N 2>/dev/null || printf '%s000' "$(date +%s)")
+
+if [[ -z "${AID_SESSIONS_LST:-}" ]]; then
+  [[ -n "${AID_DEBUG_LOG:-}" ]] && \
+    printf '%s ERR   aid-sessions-reload: AID_SESSIONS_LST not set (label=%s)\n' \
+      "$_ms" "$_label" >> "${AID_DEBUG_LOG}"
+  exit 1
+fi
+
 _pos="${FZF_POS:-1}"
 _mc="${FZF_MATCH_COUNT:-?}"
 
-[[ -n "${AID_DEBUG_LOG:-}" ]] && \
-  printf '%s SYNC  label=%s FZF_POS=%s match_count=%s -> reload-sync+pos(%s)\n' \
-    "$_ms_start" "$_label" "$_pos" "$_mc" "$_pos" >> "${AID_DEBUG_LOG}"
+# Run the list command once into a temp file.
+# If it returns empty, suppress the reload and log ERR so the cause is
+# visible in the debug log — instead of silently wiping the visible list.
+_tmp=$(mktemp)
+eval "$AID_SESSIONS_LST" > "$_tmp" 2>/dev/null || true
+_line_count=$(wc -l < "$_tmp" || printf '0')
 
-printf 'reload-sync(%s 2>/dev/null || true)+pos(%s)' "$_lst" "$_pos"
+if [[ "$_line_count" -eq 0 ]]; then
+  rm -f "$_tmp"
+  [[ -n "${AID_DEBUG_LOG:-}" ]] && \
+    printf '%s ERR   list empty (label=%s FZF_POS=%s) — suppressing reload\n' \
+      "$_ms" "$_label" "$_pos" >> "${AID_DEBUG_LOG}"
+  # Emit pos-only so the cursor stays put without reloading.
+  printf 'pos(%s)' "$_pos"
+  exit 0
+fi
+
+[[ -n "${AID_DEBUG_LOG:-}" ]] && \
+  printf '%s SYNC  label=%s FZF_POS=%s match_count=%s lines=%s -> reload-sync+pos(%s)\n' \
+    "$_ms" "$_label" "$_pos" "$_mc" "$_line_count" "$_pos" >> "${AID_DEBUG_LOG}"
+
+# cat the pre-fetched temp file; fzf runs this as the reload-sync command.
+_tmp_q=$(printf '%q' "$_tmp")
+printf 'reload-sync(cat %s; rm -f %s)+pos(%s)' "$_tmp_q" "$_tmp_q" "$_pos"

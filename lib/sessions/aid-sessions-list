@@ -54,11 +54,13 @@ _relative_time() {
 # ── Build combined session list ───────────────────────────────────────────────
 
 # Live tmux sessions: aid@<project>/<slug>
+# Use $NF (last field) instead of $2 so sessions with a blank last_attached
+# timestamp (never attached) still yield the correct session name.
 mapfile -t _live < <(
   tmux -L aid list-sessions -F "#{session_last_attached} #{session_name}" 2>/dev/null \
     | grep -E ' aid@[^/]+/[^/]+$' \
     | sort -rn \
-    | awk '{print $2}'
+    | awk '{print $NF}'
 )
 
 # Dead sessions from metadata (not in tmux).
@@ -72,6 +74,7 @@ mapfile -t _dead < <(
 declare -A _seen_projects
 _ordered_projects=()
 for _s in "${_live[@]}" "${_dead[@]}"; do
+  [[ -z "$_s" ]] && continue  # skip empty entries from blank last_attached lines
   _p=$(printf '%s' "$_s" | cut -d'@' -f2 | cut -d'/' -f1)
   if [[ -z "${_seen_projects[$_p]:-}" ]]; then
     _seen_projects[$_p]=1

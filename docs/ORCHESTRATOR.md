@@ -51,7 +51,7 @@ aid.sh --mode orchestrator
               ├── set-environment: AID_ORC_PORT, AID_ORC_NAME, AID_ORC_REPO,
               │                    AID_NVIM_SOCKET, AID_ORC_NAV_PANE,
               │                    AID_ORC_ORC_PANE, AID_ORC_DIFF_PANE
-              ├── [debug] split bottom 25% → dbg_pane (sleep infinity placeholder)
+              ├── [debug] split bottom 2 lines → dbg_pane (sleep infinity placeholder)
               ├── split right 80% → orc_pane (sleep infinity placeholder)
               ├── split orc_pane right 25% → diff_pane (sleep infinity placeholder)
               ├── respawn orc_pane  → opencode --port <AID_ORC_PORT> <repo_path>

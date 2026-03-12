@@ -35,13 +35,21 @@
  */
 
 import { appendFileSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, basename } from "path";
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
 const AID_DIR      = process.env.AID_DIR      ?? "";
 const AID_ORC_REPO = process.env.AID_ORC_REPO ?? process.cwd();
 const AID_DEBUG_LOG = process.env.AID_DEBUG_LOG ?? "";
+
+// repoPath is the effective working path used for all git operations.
+// It starts as AID_ORC_REPO and is overwritten by resolveWorktree() in boot()
+// if AID_ORC_REPO turns out to be a bare repo.
+let repoPath: string = AID_ORC_REPO;
+
+// Human-readable label for the title bar (branch name or directory basename).
+let repoLabel: string = basename(AID_ORC_REPO);
 
 if (!AID_DIR) {
   process.stderr.write("aid-diff: AID_DIR must be set\n");
@@ -185,14 +193,19 @@ interface StatEntry {
 
 async function runGit(...args: string[]): Promise<string> {
   try {
-    const proc = Bun.spawn(["git", "-C", AID_ORC_REPO, ...args], {
+    const proc = Bun.spawn(["git", "-C", repoPath, ...args], {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const out = await new Response(proc.stdout).text();
+    const [out, err] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
     await proc.exited;
+    if (err.trim()) dbg("GIT", `stderr [git ${args.join(" ")}]: ${err.trim()}`);
     return out;
-  } catch {
+  } catch (e) {
+    dbg("GIT", `spawn failed [git ${args.join(" ")}]: ${e}`);
     return "";
   }
 }
@@ -257,7 +270,7 @@ async function fileDiff(file: string, mode: DiffMode, cols: number): Promise<str
     // delta not available — use coloured git diff output directly
     try {
       const proc2 = Bun.spawn(
-        ["git", "-C", AID_ORC_REPO, "diff", "--color=always", ...modeArgs(mode), "--", file],
+          ["git", "-C", repoPath, "diff", "--color=always", ...modeArgs(mode), "--", file],
         { stdout: "pipe", stderr: "ignore" },
       );
       const out2 = await new Response(proc2.stdout).text();
@@ -277,7 +290,7 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 function startWatcher(): void {
   // Exclude .git/ internals (would cause infinite refresh loop since git
   // writes to .git/ during diff) and log-*.txt files.
-  const excludePattern = `${AID_ORC_REPO}/(\\.git|log-[^/]+\\.txt)`;
+  const excludePattern = `${repoPath}/(\\.git|log-[^/]+\\.txt)`;
   try {
     const proc = Bun.spawn(
       [
@@ -286,7 +299,7 @@ function startWatcher(): void {
         "--format", "%e",
         "-e", "close_write,create,delete,move",
         "--exclude", excludePattern,
-        AID_ORC_REPO,
+        repoPath,
       ],
       { stdout: "pipe", stderr: "ignore", stdin: "ignore" },
     );
@@ -317,7 +330,7 @@ function startWatcher(): void {
       setTimeout(() => { startWatcher(); }, 2000);
     })();
 
-    dbg("WATCH", `inotifywait started on ${AID_ORC_REPO}`);
+    dbg("WATCH", `inotifywait started on ${repoPath}`);
   } catch {
     dbg("WATCH", "inotifywait not available — polling disabled");
   }
@@ -345,7 +358,8 @@ interface AppState {
   diffCache: Map<string, string[]>;  // file → rendered diff lines
   loadingDiff: Set<string>; // files currently being fetched
   statusMsg: string;
-  isRepo:    boolean;       // false if cwd is not a git repo
+  isRepo:      boolean;     // false if cwd is not a git repo
+  isWorktree:  boolean;     // false if repo is bare / not a work tree
 }
 
 const state: AppState = {
@@ -358,6 +372,7 @@ const state: AppState = {
   loadingDiff: new Set(),
   statusMsg:   "",
   isRepo:      true,
+  isWorktree:  true,
 };
 
 // ── Data refresh ──────────────────────────────────────────────────────────────
@@ -372,11 +387,23 @@ async function refresh(): Promise<void> {
   dbg("DATA", `refresh diffMode=${state.diffMode}`);
 
   try {
-    // Check if this is a git repo.
+    // Check if this is a git repo with a work tree.
     const revParse = await runGit("rev-parse", "--git-dir");
     state.isRepo = revParse.trim().length > 0;
 
     if (!state.isRepo) {
+      state.entries = [];
+      state.mode = "view";
+      refreshing = false;
+      render();
+      if (pendingRefresh) void refresh();
+      return;
+    }
+
+    const worktreeCheck = await runGit("rev-parse", "--is-inside-work-tree");
+    state.isWorktree = worktreeCheck.trim() === "true";
+
+    if (!state.isWorktree) {
       state.entries = [];
       state.mode = "view";
       refreshing = false;
@@ -521,7 +548,7 @@ function buildFrame(): string[] {
 
   // ── Title bar ─────────────────────────────────────────────────────────────
   const modeLabel_ = modeLabel(state.diffMode);
-  const titleLeft  = ` diff · ${modeLabel_}`;
+  const titleLeft  = ` diff · ${repoLabel} · ${modeLabel_}`;
   const titleRight = " diff ";
   const titleGap   = Math.max(1, cols - titleLeft.length - titleRight.length);
   const titleBar   =
@@ -543,6 +570,8 @@ function buildFrame(): string[] {
     bodyLines.push(`  ${A.dim}loading…${A.reset}`);
   } else if (!state.isRepo) {
     bodyLines.push(`  ${A.fgGray}${A.dim}not a git repository${A.reset}`);
+  } else if (!state.isWorktree) {
+    bodyLines.push(`  ${A.fgGray}${A.dim}not a git work tree — cd into a branch worktree${A.reset}`);
   } else if (state.entries.length === 0) {
     bodyLines.push(`  ${A.fgGray}${A.dim}no changes (${modeLabel_})${A.reset}`);
   } else {
@@ -718,6 +747,126 @@ function cleanup(): void {
   safeWrite(A.showCursor + A.altScreenOff);
 }
 
+// ── Worktree resolution ───────────────────────────────────────────────────────
+
+/**
+ * Parse `git worktree list --porcelain` output into a list of worktree records.
+ * Each record has a path, a HEAD sha, and a branch ref (or "detached").
+ */
+interface WorktreeEntry {
+  path:   string;
+  head:   string;
+  branch: string;  // full ref like "refs/heads/feature/orchestrator" or "detached"
+  bare:   boolean;
+}
+
+function parseWorktreeList(raw: string): WorktreeEntry[] {
+  const entries: WorktreeEntry[] = [];
+  let current: Partial<WorktreeEntry> = {};
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      if (current.path) entries.push(current as WorktreeEntry);
+      current = { path: line.slice(9).trim(), head: "", branch: "", bare: false };
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice(5).trim();
+    } else if (line.startsWith("branch ")) {
+      current.branch = line.slice(7).trim();
+    } else if (line === "bare") {
+      current.bare = true;
+    } else if (line === "detached") {
+      current.branch = "detached";
+    }
+  }
+  if (current.path) entries.push(current as WorktreeEntry);
+  return entries;
+}
+
+/**
+ * If `root` is a bare git repo, resolve to the best non-bare worktree:
+ *   - If only one non-bare worktree exists, return it.
+ *   - If multiple exist, pick the one with the most recent commit timestamp.
+ * Returns `root` unchanged if it is already a normal worktree (or not a repo).
+ */
+async function resolveWorktree(root: string): Promise<{ path: string; label: string }> {
+  // Check if it is a bare repo.
+  const gitDirOut = await (async () => {
+    try {
+      const proc = Bun.spawn(["git", "-C", root, "rev-parse", "--git-dir"],
+        { stdout: "pipe", stderr: "ignore" });
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      return out.trim();
+    } catch { return ""; }
+  })();
+
+  if (gitDirOut !== ".") {
+    // Not a bare repo — use as-is.  Label = current branch name.
+    const branchOut = await (async () => {
+      try {
+        const proc = Bun.spawn(["git", "-C", root, "branch", "--show-current"],
+          { stdout: "pipe", stderr: "ignore" });
+        const out = await new Response(proc.stdout).text();
+        await proc.exited;
+        return out.trim();
+      } catch { return ""; }
+    })();
+    const label = branchOut || basename(root);
+    dbg("REPO", `non-bare repo; using as-is path=${root} label=${label}`);
+    return { path: root, label };
+  }
+
+  dbg("REPO", `bare repo detected at ${root}; listing worktrees`);
+
+  // Enumerate worktrees.
+  const listRaw = await (async () => {
+    try {
+      const proc = Bun.spawn(["git", "-C", root, "worktree", "list", "--porcelain"],
+        { stdout: "pipe", stderr: "ignore" });
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      return out;
+    } catch { return ""; }
+  })();
+
+  const worktrees = parseWorktreeList(listRaw).filter((w) => !w.bare);
+
+  if (worktrees.length === 0) {
+    dbg("REPO", "no non-bare worktrees found; falling back to bare root");
+    return { path: root, label: basename(root) };
+  }
+
+  if (worktrees.length === 1) {
+    const w = worktrees[0];
+    const label = w.branch.replace(/^refs\/heads\//, "") || basename(w.path);
+    dbg("REPO", `single worktree; using path=${w.path} label=${label}`);
+    return { path: w.path, label };
+  }
+
+  // Multiple worktrees — pick most recently committed.
+  const withTs = await Promise.all(
+    worktrees.map(async (w) => {
+      try {
+        const proc = Bun.spawn(
+          ["git", "-C", w.path, "log", "-1", "--format=%ct"],
+          { stdout: "pipe", stderr: "ignore" },
+        );
+        const out = await new Response(proc.stdout).text();
+        await proc.exited;
+        const ts = parseInt(out.trim(), 10) || 0;
+        return { w, ts };
+      } catch {
+        return { w, ts: 0 };
+      }
+    }),
+  );
+
+  withTs.sort((a, b) => b.ts - a.ts);
+  const best = withTs[0].w;
+  const label = best.branch.replace(/^refs\/heads\//, "") || basename(best.path);
+  dbg("REPO", `selected most-recent worktree path=${best.path} ts=${withTs[0].ts} label=${label}`);
+  return { path: best.path, label };
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 async function boot(): Promise<void> {
@@ -730,6 +879,11 @@ async function boot(): Promise<void> {
 
   // Initial render with loading state.
   render();
+
+  // Resolve effective repo path (handles bare repos with worktrees).
+  const resolved = await resolveWorktree(AID_ORC_REPO);
+  repoPath  = resolved.path;
+  repoLabel = resolved.label;
 
   // Start file watcher.
   startWatcher();
@@ -754,7 +908,7 @@ async function boot(): Promise<void> {
   // Periodic refresh every 30s as a backstop in case inotifywait misses an event.
   setInterval(() => { void refresh(); }, 30_000);
 
-  dbg("BOOT", `ready repo=${AID_ORC_REPO} diffMode=${state.diffMode}`);
+  dbg("BOOT", `ready repo=${repoPath} label=${repoLabel} diffMode=${state.diffMode}`);
 }
 
 boot().catch((e) => {

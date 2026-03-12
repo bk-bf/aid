@@ -156,7 +156,7 @@ spawn_orc_session() {
   #
   # Debug mode (4 panes):
   #   nav (left ~20%) | opencode (center ~55%) | diff (right ~25%)
-  #   ─────────────── debug log (~25% height, full width) ───────────────
+  #   ─────────────── debug log (3 lines height, full width) ────────────────
   #
   # Initial pane → will become the navigator (left).
   local nav_pane
@@ -169,9 +169,9 @@ spawn_orc_session() {
   if [[ "${AID_DEBUG:-0}" -eq 1 ]]; then
     debug_log="${repo_path}/log-$(date '+%Y%m%d-%H%M%S').txt"
     : > "$debug_log"
-    # Split bottom 25% off the initial (full-width) pane.
+    # Split bottom 3 lines off the initial (full-width) pane.
     dbg_pane=$(tmux -L aid split-window -v -t "$nav_pane" -P -F "#{pane_id}" \
-      -l "25%" -- sleep infinity)
+      -l "3" -- sleep infinity)
     tmux -L aid set-environment -t "$session" AID_DEBUG_LOG "$debug_log"
     dbg "dbg_pane=$dbg_pane debug_log=$debug_log"
     _spawn_log "$debug_log" "session=${session} repo=${repo_path} port=${orc_port} nav=${nav_pane} dbg=${dbg_pane} log=${debug_log}"
@@ -187,6 +187,12 @@ spawn_orc_session() {
   local diff_pane
   diff_pane=$(tmux -L aid split-window -h -t "$orc_pane" -P -F "#{pane_id}" \
     -l "25%" -- sleep infinity)
+
+  # After the horizontal splits, tmux may have re-equalized the vertical split
+  # and grown the debug pane.  Pin it back to the desired height.
+  if [[ -n "$dbg_pane" ]]; then
+    tmux -L aid resize-pane -t "$dbg_pane" -y 3
+  fi
 
   dbg "nav=$nav_pane orc=$orc_pane diff=$diff_pane"
   _spawn_log "$debug_log" "panes ready: nav=${nav_pane} orc=${orc_pane} diff=${diff_pane}${dbg_pane:+ dbg=${dbg_pane}}"

@@ -714,22 +714,18 @@ function renderItem(
     case "session": {
       const { session, isCurrent } = item.kind;
       const name = session.replace(/^aid@/, "");
-      const m    = metaFor(session);
-
-      const projName = m?.repo_path
-        ? m.repo_path.replace(/\/$/, "").split("/").pop() ?? name
-        : name;
 
       // Current session: purple caret; others: dim gray dot
       const caret = isCurrent
         ? `${A.fgPurple}${A.bold}❯${rfg} `
         : `${A.fgGray}·${rfg} `;
+      const m = metaFor(session);
       const branch = m?.branch
         ? ` ${A.fgGray}(${m.branch})${rfg}`
         : "";
-      // Project name: purple when current, lavender otherwise
+      // Session name: purple when current, lavender otherwise
       const nameColor = isCurrent ? A.fgPurple : A.fgLavender;
-      const left = `${selBg}${selBar}${caret}${A.bold}${nameColor}${projName}${rfg}${branch}`;
+      const left = `${selBg}${selBar}${caret}${A.bold}${nameColor}${name}${rfg}${branch}`;
 
       // live indicator: dim green text, no background box
       const liveBadge = ` ${A.fgGreen}${A.dim}live${rfg}`;
@@ -742,12 +738,8 @@ function renderItem(
     case "dead": {
       const { session, age } = item.kind;
       const name = session.replace(/^aid@/, "");
-      const m    = metaFor(session);
-      const projName = m?.repo_path
-        ? m.repo_path.replace(/\/$/, "").split("/").pop() ?? name
-        : name;
 
-      const left  = `${selBg}${selBar} ${A.dim}${A.fgGray}${projName}${rfg}`;
+      const left  = `${selBg}${selBar} ${A.dim}${A.fgGray}${name}${rfg}`;
       const right = `${A.dim}${A.fgGray}${age} ${A.bgDeadBadge}${A.fgRed}${A.bold} dead ${rst}`;
       content = rightAlign(left, right, cols);
       break;

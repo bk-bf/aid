@@ -251,9 +251,9 @@ async function orcPort(session: string): Promise<number> {
   const val = await tmuxOutput("show-environment", "-t", session, "AID_ORC_PORT");
   const m = val.match(/AID_ORC_PORT=(\d+)/);
   if (m) return parseInt(m[1], 10);
-  // Not set in tmux env — session wasn't spawned by orchestrator.sh yet, but
-  // the port is deterministic so compute it from the session name.
-  return computePort(session);
+  // AID_ORC_PORT not set → no opencode process is running for this session.
+  // Return 0 so all callers skip HTTP calls and SSE subscription.
+  return 0;
 }
 
 async function orcConversations(port: number, tmuxSession: string, filter: boolean): Promise<OrcConversation[]> {

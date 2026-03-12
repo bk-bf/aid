@@ -8,6 +8,7 @@
 #   -t <title>   Menu title (required)
 #   -x <pos>     Horizontal position (default: C — centred)
 #   -y <pos>     Vertical position   (default: C — centred)
+#   -c <client>  Target client (tty path); required when called from run-shell
 #   -d <secs>    Dismiss timeout in seconds; fires empty choice (default: 10)
 #
 # Each argument after -- is a menu item of the form:
@@ -46,6 +47,7 @@ _title=""
 _x="C"
 _y="C"
 _timeout=10
+_client=""
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -54,6 +56,7 @@ while [[ $# -gt 0 ]]; do
     -x) _x="$2";       shift 2 ;;
     -y) _y="$2";       shift 2 ;;
     -d) _timeout="$2"; shift 2 ;;
+    -c) _client="$2";  shift 2 ;;
     --) shift; break ;;
     *)  break ;;        # allow calling without -- for simple cases
   esac
@@ -110,12 +113,9 @@ for _item in "$@"; do
 done
 
 # ── Show the menu (blocks until user picks or presses Escape) ─────────────────
-tmux -L aid display-menu \
-  -T " ${_title} " \
-  -x "$_x" \
-  -y "$_y" \
-  "${_menu_args[@]}" \
-  2>/dev/null || true
+_menu_cmd=(tmux -L aid display-menu -T " ${_title} " -x "$_x" -y "$_y")
+[[ -n "$_client" ]] && _menu_cmd+=(-c "$_client")
+"${_menu_cmd[@]}" "${_menu_args[@]}" 2>/dev/null || true
 
 # Brief pause so tmux can fully repaint the pane after the menu overlay closes
 # before the caller restarts fzf on top of it.

@@ -115,7 +115,10 @@ done
 # ── Show the menu (blocks until user picks or presses Escape) ─────────────────
 _menu_cmd=(tmux -L aid display-menu -T " ${_title} " -x "$_x" -y "$_y")
 [[ -n "$_client" ]] && _menu_cmd+=(-c "$_client")
-"${_menu_cmd[@]}" "${_menu_args[@]}" 2>/dev/null || true
+_dbg "display-menu cmd: ${_menu_cmd[*]} ${_menu_args[*]}"
+_dbg "client_arg='${_client}'"
+_menu_err=$("${_menu_cmd[@]}" "${_menu_args[@]}" 2>&1); _menu_rc=$?
+_dbg "display-menu rc=${_menu_rc} stderr='${_menu_err}'"
 
 # Brief pause so tmux can fully repaint the pane after the menu overlay closes
 # before the caller restarts fzf on top of it.
@@ -124,6 +127,7 @@ sleep 0.15
 # ── Collect answer ────────────────────────────────────────────────────────────
 # show-environment prints "VAR=value"; strip the "VAR=" prefix.
 _raw=$(tmux -L aid show-environment -g "$_envvar" 2>/dev/null || true)
+_dbg "raw_env='${_raw}'"
 _answer="${_raw#"${_envvar}="}"
 
 # Clean up the environment variable.

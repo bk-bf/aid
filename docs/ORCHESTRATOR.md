@@ -73,9 +73,9 @@ when called from a pane subprocess (e.g. the `n` key in `aid-sessions`).
 Falls back to plain `switch-client -t` when the var is absent, and
 `tmux attach` when not inside tmux at all.
 
-`AID_CALLER_CLIENT` is resolved once by `aid-sessions.ts` at startup (from
-`#{client_tty}` of the nav pane, or `tty(1)` as fallback) and exported so all
-subprocesses inherit it.
+`AID_CALLER_CLIENT` is resolved once by `aid-sessions.ts` at startup. See
+[Cross-session conversation loading](#cross-session-conversation-loading) for
+the full resolution strategy.
 
 ### Opencode isolation
 
@@ -196,23 +196,67 @@ Optimistic patches are applied for:
 | `↑` / `k` | Move cursor up |
 | `↓` / `j` | Move cursor down |
 | `PgUp` / `PgDn` | Move cursor ±10 rows |
-| `Enter` | Conv row: load conversation. Session header: no-op (already current). Dead session: resurrect. |
+| `Enter` | Conv row: load conversation (switches to foreign session if needed). Session header: focus that session's terminal. Dead session: resurrect. |
 | `n` | New conversation in current session |
 | `r` | Inline rename (conv title or session name) |
 | `d` | Inline delete with `y`/`n` confirm |
 | `Ctrl-R` | Force full refresh |
 | `q` / `Esc` / `Ctrl-C` | Quit |
 
-### Conversation loading
+### Cross-session conversation loading
+
+When the user selects a conversation that belongs to a **different** aid session,
+`loadConversation` detects the mismatch (`curSession !== targetSession`) and
+delegates to `switchToForeignConv`.
 
 ```
-loadConversation(convId, session)
-  1. Optimistically patch active flags in state.items → render()
-  2. orcPort(session)  — tmux show-environment AID_ORC_PORT
-  3. tmux set-environment AID_ORC_ACTIVE_CONV=<convId>
-  4. POST /tui/select-session {"sessionID":"<convId>"}  → opencode switches TUI
-  5. if current session ≠ target: switch-client -c $AID_CALLER_CLIENT -t target
+switchToForeignConv(foreignSession, convId)
+  1. computePort(foreignSession) → POST /tui/select-session {"sessionID":"<convId>"}
+     (fires first so opencode is already on the right conv before the terminal appears)
+  2. tmux set-environment -t foreignSession AID_ORC_ACTIVE_CONV=<convId>
+  3. tmux list-clients -t foreignSession → foreignClients[]
+
+  Case A — terminal already has the session open:
+    a. hyprlandWindowForPid(foreignClients[0].pid)
+         → walk /proc/<pid>/status PPid until a PID matches hyprctl clients[]
+         → returns hyprland window address
+    b. hyprctl dispatch focuswindow address:<addr>
+         (pulls the window to the front even if it is on another workspace)
+    fallback (no hyprctl): switch-client -c <tty> -t foreignSession
+
+  Case B — no terminal has the session open:
+    a. resolveClient() → own tty
+    b. hyprlandWindowForPid(ourPid) → own window address
+    c. hyprctl clients -j → read own workspace name
+    d. hyprctl dispatch exec "[workspace <ws>] kitty -- tmux -L aid attach -t foreignSession"
+       (or plain kitty spawn if hyprctl unavailable)
+       The conv is already selected (step 1) so the user lands on the right conv
+       as soon as the terminal renders.
 ```
+
+The navigator never touches panes inside the foreign session — it only routes
+terminal focus.
+
+### `resolveClient`
+
+Resolves the tty of the terminal the user is sitting at, for use with
+`switch-client -c`. Resolution order:
+
+1. `AID_CALLER_CLIENT` env var (set at startup — see below). Strings containing
+   `"not a tty"` are treated as empty (the `tty(1)` binary prints this when
+   stdin is not a terminal, e.g. inside a `respawn-pane` process).
+2. Global `tmux list-clients -F "#{client_activity} #{client_name}"` sorted by
+   activity descending — most recently active client wins. This handles the case
+   where the user's terminal is attached to a *different* session than the nav
+   pane's own session.
+
+`AID_CALLER_CLIENT` is resolved once at startup:
+
+1. `tmux display-message -t $TMUX_PANE -p "#{client_tty}"` — works even when
+   stdin is not a tty (the common case for a respawned pane).
+2. `tty(1)` binary — only stored if it does **not** contain `"not a tty"`.
+
+
 
 ### Rename
 
@@ -278,8 +322,10 @@ each event with colour-coded category labels and a `+Δms` delta column.
 | `SPAWN` | Pane lifecycle steps from `orchestrator.sh` |
 | `SYNC` | Full refresh start/done |
 | `KEY` | Raw key bytes received |
-| `ACTN` | Higher-level action (new conv, resurrect) |
-| `CONV` | Conversation load request |
+| `ACTN` | Higher-level action (new conv, resurrect, session switch) |
+| `CONV` | Conversation load request (includes `curSession`, `foreign` flag) |
+| `CLIENT` | Result of `resolveClient()` — resolved tty or `<none>` |
+| `SWITCH` | `switchToForeignConv` steps — clients found, window address, spawn decision |
 | `RENAME` | Rename operation |
 | `DEL` | Delete operation |
 | `PRUNE` | Dead session metadata cleanup |
@@ -304,7 +350,7 @@ each event with colour-coded category labels and a `+Δms` delta column.
 
 | Variable | Set by | Purpose |
 |---|---|---|
-| `AID_CALLER_CLIENT` | `aid-sessions.ts` startup | tty of the terminal that launched aid; passed to `switch-client -c` so switches target the right screen |
+| `AID_CALLER_CLIENT` | `aid-sessions.ts` startup | tty of the terminal the user is sitting at; used by `resolveClient()` as the preferred source; filtered if it contains `"not a tty"` |
 
 ## Key design decisions
 
@@ -338,3 +384,18 @@ each event with colour-coded category labels and a `+Δms` delta column.
 - **`@aid_mode=orchestrator` session tag**: set on each session at spawn time
   so `orchestrator.sh` can list and attach to orchestrator sessions without
   interfering with plain aid sessions that might share the same tmux server.
+
+- **Hyprland-aware cross-session focus**: `switchToForeignConv` uses
+  `hyprctl clients -j` + `/proc/<pid>/status` ancestry walking to map a tmux
+  client PID to its Hyprland window address, then calls
+  `hyprctl dispatch focuswindow address:<addr>`. This pulls the terminal to the
+  front even when it is on a different Hyprland workspace. When no terminal has
+  the session open, a new kitty window is spawned on the same workspace as the
+  nav pane's terminal via `hyprctl dispatch exec "[workspace N] kitty …"`.
+  All hyprctl calls degrade gracefully when hyprctl is unavailable (falls back
+  to plain `switch-client`).
+
+- **Conv selection fires before terminal focus**: `orcSelectConversation` (HTTP
+  POST) is always the first step in `switchToForeignConv`, before any
+  `focuswindow` or kitty spawn. This guarantees opencode is already displaying
+  the correct conversation by the time the user's eyes reach the screen.

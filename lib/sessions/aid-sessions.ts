@@ -227,7 +227,7 @@ async function buildList(): Promise<ListItem[]> {
     tmuxOutput(
       "list-sessions",
       "-F",
-      "#{session_last_attached} #{@aid_mode} #{session_name}",
+      "#{session_last_attached} #{session_name}",
     ),
     TMUX_PANE
       ? tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{session_name}")
@@ -238,8 +238,7 @@ async function buildList(): Promise<ListItem[]> {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
-    .filter((l) => l.split(/\s+/)[1] === "orchestrator")
-    .map((l) => l.trim().split(/\s+/)[2])
+    .map((l) => l.trim().split(/\s+/)[1])
     .filter(Boolean)
     .sort();
 

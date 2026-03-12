@@ -1,20 +1,14 @@
-<!-- LOC cap: 427 (source: 3052, ratio: 0.14, updated: 2026-03-09) -->
+<!-- LOC cap: 317 (source: 3171, ratio: 0.10, updated: 2026-03-12) -->
 # Bugs
 
 ## Open
 
 ### BUG-024: Cross-session conversation switching does not work in orchestrator nav pane
 
-**Status**: open — investigation in progress  
+**Status**: mitigated — see [BUG-024.md](BUG-024.md) and ADR-016  
 **Branch**: `feature/orchestrator`  
 **Repro**: run `aid --mode orchestrator` with two sessions; select a conversation belonging to the other session and press Enter — terminal does not jump to the foreign session.  
 **Notes**: root cause 1 fixed (b1ee4ee: `"not a tty"` stored as `AID_CALLER_CLIENT`). Root cause 2 (`display-message #{client_tty}` returns empty for respawned pane with no attached client) may still block after fix. Next test will confirm whether `list-clients` fallback resolves the correct tty. See [BUG-024.md](BUG-024.md).
-
-### BUG-018: bufferline tab bar does not show opened files
-
-**Status**: closed — needs monitoring for confimation
-**Repro**: open a file from the treemux sidebar or cold-start with a file argument; the tab bar sometimes shows no tab for the opened buffer even though the buffer is loaded.
-**Notes**: buffer is confirmed loaded (`:buffers` shows it); tab bar simply does not render a tab for it. Intermittent. Root cause: treemux sidebar sends `:tabnew <file>` via msgpack-RPC (`nvim_command`); `BufAdd`/`TabNew` fire but `redrawtabline` is never called after the RPC dispatch, so bufferline's rendered tabline is stale. Fix: add `BufAdd`/`TabNew` autocmd calling `redrawtabline`. See [watching/BUG-018.md](watching/BUG-018.md).
 
 ### BUG-012: bufferline truncation count `[+N]` cannot be hidden via config
 
@@ -46,6 +40,13 @@
 **Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [watching/BUG-015.md](watching/BUG-015.md).
 
 ## Closed
+
+### BUG-018: bufferline tab bar does not show opened files
+
+**Status**: closed — fixed (bwipe replaces bdelete; redrawtabline autocmd added)
+**Repro**: open a file from the treemux sidebar — tab bar sometimes shows no tab for the opened buffer.
+**Root cause**: treemux sidebar sent `:tabnew <file>` via msgpack-RPC; `BufAdd`/`TabNew` fire but `redrawtabline` was never called, leaving the tabline stale. `bdelete` instead of `bwipe` also left ghost buffers polluting the tab bar.
+**Fix**: replaced `bdelete` with `bwipe`; added `BufAdd`/`TabNew` autocmd calling `redrawtabline`. See [watching/BUG-018.md](watching/BUG-018.md).
 
 ### BUG-022: tmux status bar goes blank when switching away from nvim pane
 

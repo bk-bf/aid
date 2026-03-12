@@ -1,4 +1,4 @@
-<!-- LOC cap: 427 (source: 3052, ratio: 0.14, updated: 2026-03-09) -->
+<!-- LOC cap: 317 (source: 3171, ratio: 0.10, updated: 2026-03-12) -->
 # Philosophy
 
 ## Origin

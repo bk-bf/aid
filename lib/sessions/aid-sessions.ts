@@ -19,6 +19,7 @@
 
 import { appendFileSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { Database } from "bun:sqlite";
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -210,6 +211,91 @@ async function orcDeleteConversation(port: number, convId: string): Promise<void
       signal: AbortSignal.timeout(5000),
     });
   } catch { /* best-effort */ }
+}
+
+/** Look up the directory for a conv ID from the shared opencode DB. */
+function convDirectory(convId: string): string {
+  const dbPath = join(AID_DATA, "opencode/opencode.db");
+  try {
+    const db = new Database(dbPath, { readonly: true, create: false });
+    try {
+      const row = db
+        .query<{ directory: string }, [string]>(
+          "SELECT directory FROM session WHERE id = ? LIMIT 1",
+        )
+        .get(convId);
+      return row?.directory ?? "";
+    } finally {
+      db.close();
+    }
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Respawn the current session's opencode pane with a new opencode instance
+ * pointed at `directory`, wait for it to come up, then select `convId`.
+ * This lets the user "hijack" a conv from another aid session without
+ * leaving their current tmux session.
+ */
+async function hijackOrcPane(
+  curSession: string,
+  convId: string,
+  directory: string,
+): Promise<boolean> {
+  // Get the opencode pane ID and port for the current session.
+  const [orcPaneRaw, portRaw] = await Promise.all([
+    tmuxOutput("show-environment", "-t", curSession, "AID_ORC_ORC_PANE"),
+    tmuxOutput("show-environment", "-t", curSession, "AID_ORC_PORT"),
+  ]);
+  const orcPaneMatch = orcPaneRaw.match(/AID_ORC_ORC_PANE=(%\d+)/);
+  const portMatch = portRaw.match(/AID_ORC_PORT=(\d+)/);
+
+  if (!orcPaneMatch) {
+    dbg("HIJACK", "AID_ORC_ORC_PANE not set — cannot hijack");
+    return false;
+  }
+
+  const orcPane = orcPaneMatch[1];
+  // Use the existing port if available, otherwise compute it.
+  const port = portMatch ? parseInt(portMatch[1], 10) : await computePort(curSession);
+  if (!port) return false;
+
+  const aidData = AID_DATA;
+  const aidDir = AID_DIR;
+
+  dbg("HIJACK", `respawn ${orcPane} → opencode --port ${port} ${directory}`);
+
+  // Respawn the opencode pane with the new directory.
+  const cmd = [
+    `OPENCODE_CONFIG_DIR=${JSON.stringify(join(aidDir, "opencode"))}`,
+    `OPENCODE_TUI_CONFIG=${JSON.stringify(join(aidDir, "opencode/tui.json"))}`,
+    `XDG_DATA_HOME=${JSON.stringify(aidData)}`,
+    `opencode --port ${port} ${JSON.stringify(directory)}`,
+  ].join(" ");
+
+  await tmuxRun("respawn-pane", "-k", "-t", orcPane, cmd);
+
+  // Poll until the new opencode instance is up (max ~10s).
+  for (let i = 0; i < 20; i++) {
+    await Bun.sleep(500);
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/session`, {
+        signal: AbortSignal.timeout(500),
+      });
+      if (resp.ok) break;
+    } catch { /* not up yet */ }
+  }
+
+  // Select the conversation in the freshly spawned instance.
+  await orcSelectConversation(port, convId);
+  await tmuxRun("set-environment", "-t", curSession, "AID_ORC_ACTIVE_CONV", convId);
+
+  // Focus the opencode pane so the user sees it immediately.
+  await tmuxRun("select-pane", "-t", orcPane);
+
+  return true;
 }
 
 // ── List data model ───────────────────────────────────────────────────────────
@@ -834,10 +920,22 @@ async function loadConversation(convId: string, session: string): Promise<void> 
     ? await tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{session_name}")
     : "";
 
-  // Only interact with opencode if the conversation belongs to the current session.
-  // Selecting a conv from a different session row just switches to that session.
+  // Conv belongs to a different session — hijack the current opencode pane
+  // by respawning it with an opencode instance pointed at the conv's directory.
   if (curSession && session !== curSession) {
-    await switchToSession(session);
+    const dir = convDirectory(convId);
+    if (!dir) { setStatus("could not find conv directory"); return; }
+    setStatus("loading…");
+    render();
+    const ok = await hijackOrcPane(curSession, convId, dir);
+    if (!ok) { setStatus("failed to hijack opencode pane"); return; }
+    // Optimistically mark it active across the UI.
+    for (const item of state.items) {
+      if (item.kind.type !== "conv") continue;
+      item.kind.active = item.kind.convId === convId;
+    }
+    setStatus("");
+    render();
     return;
   }
 

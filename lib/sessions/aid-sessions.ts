@@ -357,9 +357,68 @@ async function resolveClient(): Promise<string> {
 }
 
 /**
+ * Walk the process tree upward from `pid` and return the first PID that
+ * appears in the `candidatePids` set.  Returns 0 if no match found within
+ * `maxDepth` steps.
+ */
+async function findAncestorIn(pid: number, candidatePids: Set<number>, maxDepth = 12): Promise<number> {
+  let cur = pid;
+  for (let i = 0; i < maxDepth; i++) {
+    if (candidatePids.has(cur)) return cur;
+    const status = await Bun.file(`/proc/${cur}/status`).text().catch(() => "");
+    const m = status.match(/^PPid:\s*(\d+)/m);
+    if (!m) break;
+    const parent = Number(m[1]);
+    if (parent <= 1) break;
+    cur = parent;
+  }
+  return 0;
+}
+
+/**
+ * Query hyprctl for the window address of the terminal emulator that is
+ * the ancestor of `tmuxClientPid`.  Returns "" if hyprctl is unavailable
+ * or no matching window is found.
+ */
+async function hyprlandWindowForPid(tmuxClientPid: number): Promise<string> {
+  try {
+    const proc = Bun.spawn(["hyprctl", "clients", "-j"], { stdout: "pipe", stderr: "ignore" });
+    const raw = await new Response(proc.stdout).text();
+    await proc.exited;
+    const clients: Array<{ pid: number; address: string }> = JSON.parse(raw);
+    const candidatePids = new Set(clients.map((c) => c.pid));
+    const matchPid = await findAncestorIn(tmuxClientPid, candidatePids);
+    if (!matchPid) return "";
+    return clients.find((c) => c.pid === matchPid)?.address ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Focus a hyprland window by address.  No-op if hyprctl is unavailable.
+ */
+async function hyprFocusWindow(address: string): Promise<void> {
+  if (!address) return;
+  try {
+    const proc = Bun.spawn(["hyprctl", "dispatch", "focuswindow", `address:${address}`], {
+      stdout: "ignore", stderr: "ignore",
+    });
+    await proc.exited;
+  } catch { /* hyprctl not available */ }
+}
+
+/**
  * Select a conv in a foreign aid session by switching the tmux client to
  * that session.  Tells the foreign opencode to show the conv via HTTP first,
- * then jumps the terminal there with switch-client.
+ * then pulls the user's focus there.
+ *
+ * Strategy:
+ *  1. If any terminal already has the foreign session open:
+ *       a. switch-client that terminal to the foreign session
+ *       b. focuswindow across hyprland workspaces
+ *  2. If no terminal has the session open yet:
+ *       spawn kitty on the current workspace with `tmux attach -t <session>`
  */
 async function switchToForeignConv(
   foreignSession: string,
@@ -371,15 +430,73 @@ async function switchToForeignConv(
     await orcSelectConversation(port, convId);
     await tmuxRun("set-environment", "-t", foreignSession, "AID_ORC_ACTIVE_CONV", convId);
   }
-  // Jump the terminal to the foreign session.
-  const client = await resolveClient();
-  dbg("SWITCH", `client=${client || "<none>"} foreignSession=${foreignSession}`);
-  if (client) {
-    const rc = await tmuxRun("switch-client", "-c", client, "-t", foreignSession);
-    dbg("SWITCH", `switch-client -c ${client} -t ${foreignSession} rc=${rc}`);
+
+  // Find all tmux clients attached to the foreign session.
+  const rawClients = await tmuxOutput(
+    "list-clients", "-t", foreignSession,
+    "-F", "#{client_name} #{client_pid}",
+  ).catch(() => "");
+  const foreignClients = rawClients.trim().split("\n")
+    .map((l) => l.trim().split(/\s+/))
+    .filter((p) => p.length >= 2 && p[0])
+    .map((p) => ({ tty: p[0], pid: Number(p[1]) }));
+
+  dbg("SWITCH", `foreignSession=${foreignSession} clients=${JSON.stringify(foreignClients)}`);
+
+  if (foreignClients.length > 0) {
+    // A terminal already has the foreign session open — focus its window.
+    const { tty, pid } = foreignClients[0];
+    dbg("SWITCH", `terminal already on session: tty=${tty} pid=${pid}`);
+    const winAddr = await hyprlandWindowForPid(pid);
+    dbg("SWITCH", `hyprland window address: ${winAddr || "<none>"}`);
+    if (winAddr) {
+      await hyprFocusWindow(winAddr);
+      return true;
+    }
+    // hyprctl unavailable — fall back to switch-client on that tty.
+    await tmuxRun("switch-client", "-c", tty, "-t", foreignSession);
+    return true;
+  }
+
+  // No terminal has the foreign session open — find our own terminal window
+  // and spawn a new kitty on the same workspace.
+  const ourClient = await resolveClient();
+  dbg("SWITCH", `no terminal on session; ourClient=${ourClient || "<none>"}`);
+  let ourWindowAddr = "";
+  if (ourClient) {
+    const ourPid = await tmuxOutput(
+      "list-clients", "-F", "#{client_name} #{client_pid}",
+    ).then((raw) => {
+      const line = raw.trim().split("\n").find((l) => l.startsWith(ourClient));
+      return line ? Number(line.trim().split(/\s+/)[1]) : 0;
+    }).catch(() => 0);
+    if (ourPid) ourWindowAddr = await hyprlandWindowForPid(ourPid);
+  }
+
+  // Determine target workspace: same as current window if known, else default.
+  let targetWorkspace = "";
+  if (ourWindowAddr) {
+    try {
+      const proc = Bun.spawn(["hyprctl", "clients", "-j"], { stdout: "pipe", stderr: "ignore" });
+      const raw = await new Response(proc.stdout).text();
+      await proc.exited;
+      const clients: Array<{ address: string; workspace: { name: string } }> = JSON.parse(raw);
+      targetWorkspace = clients.find((c) => c.address === ourWindowAddr)?.workspace.name ?? "";
+    } catch { /* ignore */ }
+  }
+
+  dbg("SWITCH", `spawning kitty on workspace=${targetWorkspace || "<current>"} for session=${foreignSession}`);
+
+  const spawnArgs = ["kitty", "--", "tmux", "-L", "aid", "attach", "-t", foreignSession];
+  if (targetWorkspace) {
+    // Use hyprctl dispatch exec to open on the correct workspace.
+    await Bun.spawn(
+      ["hyprctl", "dispatch", "exec", `[workspace ${targetWorkspace}] kitty -- tmux -L aid attach -t ${foreignSession}`],
+      { stdout: "ignore", stderr: "ignore" },
+    ).exited.catch(() => {});
   } else {
-    const rc = await tmuxRun("switch-client", "-t", foreignSession);
-    dbg("SWITCH", `switch-client -t ${foreignSession} (no client) rc=${rc}`);
+    await Bun.spawn(spawnArgs, { stdout: "ignore", stderr: "ignore", stdin: "ignore" })
+      .exited.catch(() => {});
   }
   return true;
 }
@@ -1028,12 +1145,9 @@ function currentItem(): ListItem | undefined {
 
 async function switchToSession(session: string): Promise<void> {
   dbg("ACTN", `switch-client -> ${session}`);
-  const client = await resolveClient();
-  if (client) {
-    await tmuxRun("switch-client", "-c", client, "-t", session);
-  } else {
-    await tmuxRun("switch-client", "-t", session);
-  }
+  // Reuse the same hyprland-aware logic as conv switching — pass a dummy convId
+  // (empty string) so the HTTP select call is skipped.
+  await switchToForeignConv(session, "");
 }
 
 async function loadConversation(convId: string, session: string): Promise<void> {

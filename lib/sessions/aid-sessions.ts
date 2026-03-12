@@ -1612,6 +1612,19 @@ process.on("SIGHUP", () => { /* ignore */ });
 // Safety net: always restore terminal on any unhandled error before dying
 process.on("uncaughtException", (e) => { dbg("ERR", `uncaught: ${e}`); try { cleanup(); } catch { /* ignore */ } process.exit(1); });
 process.on("unhandledRejection", (e) => { dbg("ERR", `unhandledRejection: ${e}`); try { cleanup(); } catch { /* ignore */ } process.exit(1); });
+// stdout EIO / broken-pipe — the tmux pane's tty is gone (e.g. detach or pane close).
+// Handling 'error' here prevents it from bubbling up to uncaughtException.
+process.stdout.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EIO" || e.code === "EPIPE") {
+    dbg("STDOUT", `stdout ${e.code} — tty gone, exiting`);
+    cleanup();
+    process.exit(0);
+  }
+  // Any other stdout error is unexpected — treat as fatal
+  dbg("ERR", `stdout error: ${e}`);
+  try { cleanup(); } catch { /* ignore */ }
+  process.exit(1);
+});
 process.stdout.on("resize", () => { render(); });
 
 // ── Background dead-session prune ─────────────────────────────────────────────

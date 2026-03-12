@@ -828,11 +828,23 @@ async function switchToSession(session: string): Promise<void> {
 
 async function loadConversation(convId: string, session: string): Promise<void> {
   dbg("CONV", `load convId=${convId} session=${session}`);
+
+  // Determine the current tmux session (the one this navigator pane lives in).
+  const curSession = TMUX_PANE
+    ? await tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{session_name}")
+    : "";
+
+  // Only interact with opencode if the conversation belongs to the current session.
+  // Selecting a conv from a different session row just switches to that session.
+  if (curSession && session !== curSession) {
+    await switchToSession(session);
+    return;
+  }
+
   const port = await orcPort(session);
   if (!port) { setStatus("no opencode port for session"); return; }
 
   // Optimistically update the active marker in state immediately — no round-trip.
-  // This gives instant visual feedback before the tmux env write completes.
   for (const item of state.items) {
     if (item.kind.type !== "conv" || item.kind.session !== session) continue;
     item.kind.active = item.kind.convId === convId;
@@ -841,13 +853,6 @@ async function loadConversation(convId: string, session: string): Promise<void> 
 
   await tmuxRun("set-environment", "-t", session, "AID_ORC_ACTIVE_CONV", convId);
   await orcSelectConversation(port, convId);
-
-  const cur = TMUX_PANE
-    ? await tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{session_name}")
-    : "";
-  if (cur && cur !== session) {
-    await switchToSession(session);
-  }
 }
 
 async function newConversation(): Promise<void> {

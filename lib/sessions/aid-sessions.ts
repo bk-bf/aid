@@ -465,10 +465,17 @@ function renderItem(
   /** total number of convs in this session's group */
   convTotal = 0,
 ): string {
-  const selBg = selected ? A.bgSelected : "";
-  const rst   = A.reset;
-  // Restore selBg after an inline reset so the highlight stays consistent
-  const rbg   = `${rst}${selBg}`;
+  const rst = A.reset;
+
+  // Selection is shown as a purple left-edge bar (▌) so the full-line background
+  // tint never competes with the text colors, bold markers, or icons on the row.
+  // We still apply a very subtle bg tint for the full row so the eye can track it,
+  // but keep it extremely dark so fg colors/bold punch through unimpeded.
+  const selBar = selected ? `${A.fgPurple}▌${rst}` : " ";
+  const selBg  = selected ? A.bgSelected : "";
+  // rfg: restore only the bg after an inline fg color change — does NOT reset bold/dim.
+  // \x1b[39m = "default foreground color" (fg reset only).
+  const rfg = `\x1b[39m${selBg}`;
 
   let content = "";
 
@@ -486,17 +493,17 @@ function renderItem(
 
       // Current session: purple caret; others: dim gray dot
       const caret = isCurrent
-        ? `${A.fgPurple}${A.bold}❯${rbg} `
-        : `${A.fgGray}·${rbg} `;
+        ? `${A.fgPurple}${A.bold}❯${rfg} `
+        : `${A.fgGray}·${rfg} `;
       const branch = m?.branch
-        ? ` ${A.fgGray}(${m.branch})${rbg}`
+        ? ` ${A.fgGray}(${m.branch})${rfg}`
         : "";
       // Project name: purple when current, lavender otherwise
       const nameColor = isCurrent ? A.fgPurple : A.fgLavender;
-      const left = `${selBg}${caret}${A.bold}${nameColor}${projName}${rbg}${branch}`;
+      const left = `${selBg}${selBar}${caret}${A.bold}${nameColor}${projName}${rfg}${branch}`;
 
       // live indicator: dim green text, no background box
-      const liveBadge = ` ${A.fgGreen}${A.dim}live${rbg}`;
+      const liveBadge = ` ${A.fgGreen}${A.dim}live${rfg}`;
 
       content = rightAlign(left, liveBadge, cols);
       break;
@@ -511,8 +518,8 @@ function renderItem(
         ? m.repo_path.replace(/\/$/, "").split("/").pop() ?? name
         : name;
 
-      const left  = `${selBg}  ${A.dim}${A.fgGray}${projName}${rbg}`;
-      const right = `${A.dim}${A.fgGray}${age} ${A.bgDeadBadge}${A.fgRed}${A.bold} dead ${rst}${selBg}`;
+      const left  = `${selBg}${selBar} ${A.dim}${A.fgGray}${projName}${rfg}`;
+      const right = `${A.dim}${A.fgGray}${age} ${A.bgDeadBadge}${A.fgRed}${A.bold} dead ${rst}`;
       content = rightAlign(left, right, cols);
       break;
     }
@@ -524,19 +531,19 @@ function renderItem(
       const isLast   = convIndex === convTotal - 1;
       const treeChar = isLast ? "└─" : "├─";
       // Tree connector: lavender
-      const treePfx  = `${A.fgLavender}${treeChar}${rbg}`;
+      const treePfx  = `${A.fgLavender}${treeChar}${rfg}`;
 
       // Active: purple filled circle; inactive: dim gray hollow circle
       const marker = active
-        ? `${A.fgPurple}${A.bold}●${rbg} `
-        : `${A.fgGray}○${rbg} `;
+        ? `${A.fgPurple}${A.bold}●${rfg} `
+        : `${A.fgGray}${A.dim}○${rfg} `;
 
-      // Title: bright white when active, default otherwise
-      const titleFmt = active ? `${A.bold}${A.fgWhite}` : "";
+      // Title: bright white when active, muted otherwise; bold preserved via rfg
+      const titleFmt = active ? `${A.bold}${A.fgWhite}` : `${A.dim}`;
 
-      const left  = `${selBg} ${treePfx} ${marker}${titleFmt}${title}${rbg}`;
+      const left  = `${selBg}${selBar} ${treePfx} ${marker}${titleFmt}${title}${rfg}`;
       // Age: dim gray
-      const right = `${A.fgGray}${A.dim}${age}${rbg}`;
+      const right = `${A.fgGray}${A.dim}${age}`;
       content = rightAlign(left, right, cols);
       break;
     }
@@ -552,7 +559,7 @@ function renderItem(
       const msg = item.kind.reason === "no-sessions"
         ? "no sessions yet"
         : "no conversations yet";
-      content = `${selBg} ${A.fgLavender}└─ ${A.dim}${A.fgGray}${msg}${rbg}`;
+      content = `${selBg}${selBar} ${A.fgLavender}└─ ${A.dim}${A.fgGray}${msg}${rfg}`;
       break;
     }
   }

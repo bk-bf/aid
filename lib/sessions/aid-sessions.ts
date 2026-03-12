@@ -170,6 +170,52 @@ interface OrcConversation {
   directory?: string;
 }
 
+/**
+ * Return the epoch-ms timestamp at which the process listening on `port` started.
+ * Uses `ss -tlnp` to find the PID, then reads /proc/<pid>/stat field 22
+ * (starttime in clock ticks since boot), and converts using /proc/uptime.
+ * Returns 0 on any failure (caller should treat 0 as "don't filter").
+ */
+async function processStartTimeMs(port: number): Promise<number> {
+  if (!port) return 0;
+  try {
+    // Find PID: ss -tlnp output contains  users:(("opencode",pid=NNNN,fd=...))
+    const proc = Bun.spawn(["ss", "-tlnp", `sport = :${port}`], {
+      stdout: "pipe", stderr: "ignore",
+    });
+    const ssOut = await new Response(proc.stdout).text();
+    await proc.exited;
+    const pidMatch = ssOut.match(/pid=(\d+)/);
+    if (!pidMatch) return 0;
+    const pid = pidMatch[1];
+
+    // Read /proc/<pid>/stat — field 22 (0-indexed: 21) is starttime in jiffies
+    const statRaw = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    // stat fields are space-separated; field[1] (comm) may contain spaces inside
+    // parens, so we strip it out first.
+    const statStripped = statRaw.replace(/\(.*?\)/, "()");
+    const fields = statStripped.trim().split(/\s+/);
+    const startTicks = parseInt(fields[21], 10);
+    if (isNaN(startTicks)) return 0;
+
+    // CLK_TCK is almost always 100 on Linux; avoid spawning getconf on every call.
+    const CLK_TCK = 100;
+
+    // /proc/uptime: "<uptime_seconds> <idle_seconds>"
+    const uptimeRaw = readFileSync("/proc/uptime", "utf-8");
+    const uptimeSec = parseFloat(uptimeRaw.trim().split(/\s+/)[0]);
+    if (isNaN(uptimeSec)) return 0;
+
+    // boot time in ms
+    const bootMs = Date.now() - uptimeSec * 1000;
+    // process start offset from boot in ms
+    const startOffsetMs = (startTicks / CLK_TCK) * 1000;
+    return Math.floor(bootMs + startOffsetMs);
+  } catch {
+    return 0;
+  }
+}
+
 /** Compute the deterministic opencode port for a session name (mirrors orchestrator.sh). */
 async function computePort(session: string): Promise<number> {
   const name = session.replace(/^aid@/, "");
@@ -199,14 +245,29 @@ async function orcPort(session: string): Promise<number> {
 async function orcConversations(port: number, tmuxSession: string): Promise<OrcConversation[]> {
   if (port) {
     try {
-      const resp = await fetch(`http://127.0.0.1:${port}/session`, {
-        headers: { Accept: "application/json" },
-        signal: AbortSignal.timeout(2000),
-      });
+      const [resp, startMs] = await Promise.all([
+        fetch(`http://127.0.0.1:${port}/session`, {
+          headers: { Accept: "application/json" },
+          signal: AbortSignal.timeout(2000),
+        }),
+        processStartTimeMs(port),
+      ]);
       if (resp.ok) {
         const all = (await resp.json()) as OrcConversation[];
-        const sorted = all.sort((a, b) => b.time.updated - a.time.updated);
-        // Tag ownership while we have live data — this is how the map gets populated.
+        // Filter to only convs that were created after this opencode process started.
+        // This is the reliable way to isolate sessions that share the same directory/DB.
+        const owned = startMs > 0
+          ? all.filter((c) => {
+              // time.updated is always set; time.created may not be in the type but
+              // the opencode API returns it — fall back to time.updated if absent.
+              const created: number = (c as any).time?.created ?? c.time.updated;
+              return created >= startMs;
+            })
+          : all;
+        const sorted = owned.sort((a, b) => b.time.updated - a.time.updated);
+        dbg("ORC", `port=${port} startMs=${startMs} all=${all.length} owned=${owned.length}`);
+        // Tag ownership with the time-filtered set only — last tagger won't pollute
+        // another instance's convs since we only see this instance's convs now.
         if (sorted.length > 0) tagConvOwners(sorted.map((c) => c.id), tmuxSession);
         return sorted;
       }

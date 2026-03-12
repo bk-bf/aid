@@ -747,19 +747,32 @@ function clampLine(s: string, maxCols: number): string {
 
 /**
  * Right-align `right` within `totalCols`.
- * If there isn't enough room for both sides, the right part is dropped
- * and the left is clamped to `totalCols`.
+ *
+ * The right part (timestamp / badge) is always rendered — the left is
+ * truncated with "…" to make room rather than being allowed to push the
+ * right off-screen.  If the pane is so narrow that even the right alone
+ * doesn't fit, the left is dropped entirely and only the right is shown.
  */
 function rightAlign(left: string, right: string, totalCols: number): string {
   const leftLen  = stripAnsi(left).length;
   const rightLen = stripAnsi(right).length;
-  const needed   = leftLen + 1 + rightLen;
-  if (needed > totalCols) {
-    // Not enough room — just return left clamped to totalCols
-    return clampLine(left, totalCols);
+
+  if (leftLen + 1 + rightLen <= totalCols) {
+    // Plenty of room — standard gap fill
+    const gap = totalCols - leftLen - rightLen;
+    return left + " ".repeat(gap) + right;
   }
-  const gap = totalCols - leftLen - rightLen;
-  return left + " ".repeat(gap) + right;
+
+  // Not enough room: truncate left to make space for right.
+  // We need: truncatedLeft + "…" + " " + right <= totalCols
+  //   → truncatedLeft <= totalCols - rightLen - 2  (1 for "…", 1 for space)
+  const leftBudget = totalCols - rightLen - 2;
+  if (leftBudget <= 0) {
+    // Pane is extremely narrow — right alone, clamped
+    return clampLine(right, totalCols);
+  }
+  const truncLeft = clampLine(left, leftBudget);
+  return truncLeft + `…${A.reset} ` + right;
 }
 
 function renderItem(
@@ -917,11 +930,19 @@ function buildFrame(): string[] {
   // Build the full-width bar explicitly so the gap chars carry the bg color.
   // rightAlign() only inserts plain spaces (no escape codes) so we can't use
   // it here — the gap would revert to terminal default background.
-  const titleLeftStr  = ` aid@${AID_ORC_NAME || "aid"}`;
-  const filterTag     = state.filterBySession ? "" : ` ${A.reset}${A.bgTitleBar}${A.fgAmber}[all]`;
-  const titleRightStr = " sessions ";
-  const filterTagLen  = state.filterBySession ? 0 : 6; // " [all]" = 6 visible chars
-  const titleGap = Math.max(1, cols - titleLeftStr.length - filterTagLen - titleRightStr.length);
+  // " sessions " is always shown on the right; the left name is truncated with
+  // "…" if the pane is too narrow to fit both.
+  const titleRightStr  = " sessions ";
+  const filterTag      = state.filterBySession ? "" : ` ${A.reset}${A.bgTitleBar}${A.fgAmber}[all]`;
+  const filterTagLen   = state.filterBySession ? 0 : 6; // " [all]" = 6 visible chars
+  const titleRightLen  = titleRightStr.length;            // 10 — plain ASCII, no ANSI
+  const rawTitleLeft   = ` aid@${AID_ORC_NAME || "aid"}`;
+  // Budget for left + filterTag so " sessions " always fits: cols - filterTagLen - titleRightLen
+  const leftBudget     = cols - filterTagLen - titleRightLen;
+  const titleLeftStr   = rawTitleLeft.length <= leftBudget
+    ? rawTitleLeft
+    : rawTitleLeft.slice(0, Math.max(1, leftBudget - 1)) + "…";
+  const titleGap = Math.max(0, cols - titleLeftStr.length - filterTagLen - titleRightLen);
   const titleBar =
     `${A.bgTitleBar}${A.fgWhite}${A.bold}${titleLeftStr}${filterTag}` +
     `${A.reset}${A.bgTitleBar}${" ".repeat(titleGap)}` +

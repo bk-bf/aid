@@ -212,11 +212,14 @@ function convosFromDbForSession(tmuxSession: string): OrcConversation[] {
 }
 
 
+type ConvStatus = "idle" | "busy" | "retry";
+
 interface OrcConversation {
   id: string;
   title?: string;
   time: { updated: number };
   directory?: string;
+  status?: ConvStatus;
 }
 
 /** Compute the deterministic opencode port for a session name (mirrors orchestrator.sh). */
@@ -331,6 +334,33 @@ async function orcDeleteConversation(port: number, convId: string): Promise<void
       signal: AbortSignal.timeout(5000),
     });
   } catch { /* best-effort */ }
+}
+
+/**
+ * Fetch the status of all conversations on this opencode instance.
+ * Returns a map of conv_id → ConvStatus.  Falls back to an empty map on error.
+ * Endpoint: GET /session/status → { [id: string]: { type: "idle"|"busy"|"retry" } }
+ */
+async function orcSessionStatuses(port: number): Promise<Map<string, ConvStatus>> {
+  if (!port) return new Map();
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/session/status`, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!resp.ok) return new Map();
+    const raw = (await resp.json()) as Record<string, { type: string }>;
+    const result = new Map<string, ConvStatus>();
+    for (const [id, s] of Object.entries(raw)) {
+      if (s.type === "busy" || s.type === "retry") {
+        result.set(id, s.type);
+      }
+      // "idle" is the default — omit from map to keep it small
+    }
+    return result;
+  } catch {
+    return new Map();
+  }
 }
 
 /**
@@ -505,7 +535,7 @@ async function switchToForeignConv(
 
 type ItemKind =
   | { type: "session"; session: string; isCurrent: boolean }
-  | { type: "conv"; convId: string; session: string; title: string; age: string; active: boolean }
+  | { type: "conv"; convId: string; session: string; title: string; age: string; active: boolean; status: ConvStatus }
   | { type: "dead"; session: string; age: string }
   | { type: "sep" }
   | { type: "empty"; reason: "no-convs" | "no-sessions" };
@@ -561,6 +591,7 @@ async function buildList(): Promise<ListItem[]> {
     port: number;
     convs: OrcConversation[];
     activeConvId: string;
+    statuses: Map<string, ConvStatus>;
   }
 
   const sessionData: SessionData[] = await Promise.all(
@@ -569,8 +600,11 @@ async function buildList(): Promise<ListItem[]> {
         orcPort(session),
         orcActiveConv(session),
       ]);
-      const convs = await orcConversations(port, session, state.filterBySession);
-      return { session, port, convs, activeConvId };
+      const [convs, statuses] = await Promise.all([
+        orcConversations(port, session, state.filterBySession),
+        orcSessionStatuses(port),
+      ]);
+      return { session, port, convs, activeConvId, statuses };
     }),
   );
 
@@ -578,7 +612,7 @@ async function buildList(): Promise<ListItem[]> {
   const items: ListItem[] = [];
   let first = true;
 
-  for (const { session, convs, activeConvId } of sessionData) {
+  for (const { session, convs, activeConvId, statuses } of sessionData) {
     if (!first) items.push({ kind: { type: "sep" }, selectable: false });
     first = false;
 
@@ -601,6 +635,7 @@ async function buildList(): Promise<ListItem[]> {
             title,
             age: relativeTime(conv.time.updated),
             active: conv.id === activeConvId,
+            status: statuses.get(conv.id) ?? "idle",
           },
           selectable: true,
         });
@@ -837,7 +872,7 @@ function renderItem(
 
     // ── conversation row ──────────────────────────────────────────────────────
     case "conv": {
-      const { title, age, active } = item.kind;
+      const { title, age, active, status } = item.kind;
 
       const isLast   = convIndex === convTotal - 1;
       const treeChar = isLast ? "└─" : "├─";
@@ -853,8 +888,16 @@ function renderItem(
       const titleFmt = active ? `${A.bold}${A.fgWhite}` : `${A.dim}`;
 
       const left  = `${selBg}${selBar} ${treePfx} ${marker}${titleFmt}${title}${rfg}`;
-      // Age: dim gray
-      const right = `${A.fgGray}${A.dim}${age}`;
+
+      // Status indicator (Codex terminology): shown before age when not idle.
+      //   busy  → amber • Working   (agent is generating / tools are running)
+      //   retry → red   ↺ Retry     (request failed, retrying)
+      //   idle  → nothing           (Codex style: no indicator when waiting)
+      const statusPfx =
+        status === "busy"  ? `${A.fgAmber}• Working${rfg}  ` :
+        status === "retry" ? `${A.fgRed}↺ Retry${rfg}  `   :
+        "";
+      const right = `${statusPfx}${A.fgGray}${A.dim}${age}`;
       content = rightAlign(left, right, cols);
       break;
     }
@@ -1226,7 +1269,7 @@ async function newConversation(): Promise<void> {
   // Optimistic: insert a placeholder conv at the top of this session's group
   const placeholderId = "__placeholder__";
   const placeholder: ListItem = {
-    kind: { type: "conv", convId: placeholderId, session: targetSession, title: "new conversation…", age: "now", active: false },
+    kind: { type: "conv", convId: placeholderId, session: targetSession, title: "new conversation…", age: "now", active: false, status: "idle" as ConvStatus },
     selectable: false,
   };
   // Insert after the session header (first item for this session), before existing convs

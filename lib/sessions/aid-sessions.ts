@@ -322,12 +322,24 @@ const A = {
   bold:       "\x1b[1m",
   dim:        "\x1b[2m",
   italic:     "\x1b[3m",
+  fgWhite:    "\x1b[97m",
   fgGreen:    "\x1b[32m",
+  fgBrGreen:  "\x1b[92m",
   fgRed:      "\x1b[31m",
+  fgBrRed:    "\x1b[91m",
   fgBlue:     "\x1b[34m",
+  fgBrBlue:   "\x1b[94m",
+  fgCyan:     "\x1b[36m",
+  fgBrCyan:   "\x1b[96m",
   fgYellow:   "\x1b[33m",
+  fgBrYellow: "\x1b[93m",
   fgGray:     "\x1b[90m",
-  bgSelected: "\x1b[48;5;236m",
+  fgMagenta:  "\x1b[35m",
+  // Backgrounds
+  bgSelected: "\x1b[48;5;238m",   // medium-dark grey (was 236 = almost invisible)
+  bgTitleBar: "\x1b[48;5;17m",    // deep navy blue
+  bgDeadBadge:"\x1b[48;5;52m",    // dark red
+  bgLiveBadge:"\x1b[48;5;22m",    // dark green
   // Alternate screen buffer — no scrollback, no history leak
   altScreenOn:  "\x1b[?1049h",
   altScreenOff: "\x1b[?1049l",
@@ -350,52 +362,118 @@ function stripAnsi(s: string): string {
   return s.replace(/\x1b\[[0-9;]*[mGKHABCDJsuhl?]/g, "");
 }
 
-function renderItem(item: ListItem, selected: boolean, cols: number): string {
-  const bg = selected ? A.bgSelected : "";
-  const rst = A.reset;
+/** Right-align `right` within `totalCols`, given the visible length of `left`. */
+function rightAlign(left: string, right: string, totalCols: number): string {
+  const leftLen = stripAnsi(left).length;
+  const rightLen = stripAnsi(right).length;
+  const gap = Math.max(1, totalCols - leftLen - rightLen);
+  return left + " ".repeat(gap) + right;
+}
+
+function renderItem(
+  item: ListItem,
+  selected: boolean,
+  cols: number,
+  /** index of this item within the conv list of its session (0-based) */
+  convIndex = 0,
+  /** total number of convs in this session's group */
+  convTotal = 0,
+): string {
+  const bg   = selected ? A.bgSelected : "";
+  const rst  = A.reset;
+  // Restore bg after an inline reset so the highlight stays consistent
+  const rbg  = `${rst}${bg}`;
 
   let content = "";
 
   switch (item.kind.type) {
+
+    // ── session header ────────────────────────────────────────────────────────
     case "session": {
       const { session, isCurrent } = item.kind;
       const name = session.replace(/^aid@/, "");
-      const m = metaFor(session);
-      const marker = isCurrent ? `${A.fgBlue}▶${rst}${bg} ` : "  ";
-      const repo = m?.repo_path ? `  ${A.dim}${m.repo_path}${rst}${bg}` : "";
-      const branch = m?.branch ? `  ${A.dim}(${m.branch})${rst}${bg}` : "";
-      content = `${bg}${marker}${A.bold}aid@${name}${rst}${bg}  ${A.fgGreen}[live]${rst}${bg}${repo}${branch}`;
+      const m    = metaFor(session);
+
+      // Project short name = last path segment
+      const projName = m?.repo_path
+        ? m.repo_path.replace(/\/$/, "").split("/").pop() ?? name
+        : name;
+
+      // Left side: caret + project name + optional branch
+      const caret  = isCurrent
+        ? `${A.fgBrCyan}${A.bold}❯${rbg} `
+        : `${A.fgGray}·${rbg} `;
+      const branch = m?.branch
+        ? ` ${A.fgGray}(${m.branch})${rbg}`
+        : "";
+      const left = `${bg}${caret}${A.bold}${A.fgBrCyan}${projName}${rbg}${branch}`;
+
+      // Right side: [live] badge
+      const liveBadge = ` ${A.bgLiveBadge}${A.fgBrGreen}${A.bold} live ${rst}${bg}`;
+
+      content = rightAlign(left, liveBadge, cols);
       break;
     }
+
+    // ── dead session ──────────────────────────────────────────────────────────
     case "dead": {
       const { session, age } = item.kind;
       const name = session.replace(/^aid@/, "");
-      const m = metaFor(session);
-      const repo = m?.repo_path ? `  ${m.repo_path}` : "";
-      content = `${bg}  ${A.dim}aid@${name}  [dead]  ${age}${repo}${rst}`;
+      const m    = metaFor(session);
+      const projName = m?.repo_path
+        ? m.repo_path.replace(/\/$/, "").split("/").pop() ?? name
+        : name;
+
+      const left = `${bg}  ${A.dim}${A.fgGray}${projName}${rbg}`;
+      const right = `${A.dim}${age} ${A.bgDeadBadge}${A.fgBrRed}${A.bold} dead ${rst}${bg}`;
+      content = rightAlign(left, right, cols);
       break;
     }
+
+    // ── conversation row ──────────────────────────────────────────────────────
     case "conv": {
       const { title, age, active } = item.kind;
-      const marker = active ? `${A.fgBlue}▶${rst}${bg} ` : "  ";
-      content = `${bg}    ${marker}${title}  ${A.dim}${age}${rst}`;
+
+      // Tree connector — last conv gets └─, others get ├─
+      const isLast   = convIndex === convTotal - 1;
+      const treeChar = isLast ? "└─" : "├─";
+      const treePfx  = `${A.fgGray}${treeChar}${rbg}`;
+
+      // Active marker
+      const marker = active
+        ? `${A.fgBrYellow}${A.bold}●${rbg} `
+        : `${A.fgGray}○${rbg} `;
+
+      // Title color: active = brighter
+      const titleColor = active
+        ? `${A.bold}${A.fgWhite}`
+        : ``;
+
+      const left = `${bg} ${treePfx} ${marker}${titleColor}${title}${rbg}`;
+      const right = `${A.dim}${A.fgGray}${age}${rbg}`;
+      content = rightAlign(left, right, cols);
       break;
     }
+
+    // ── separator between session groups ─────────────────────────────────────
     case "sep": {
-      return `${A.dim}${"─".repeat(cols)}${rst}`;
+      // Thin colored rule
+      return `${A.fgGray}${A.dim}${"─".repeat(cols)}${rst}`;
     }
+
+    // ── empty placeholder ─────────────────────────────────────────────────────
     case "empty": {
       const msg = item.kind.reason === "no-sessions"
-        ? "(no sessions yet)"
-        : "(no conversations yet)";
-      content = `${bg}    ${A.dim}${msg}${rst}`;
+        ? "no sessions yet"
+        : "no conversations yet";
+      content = `${bg} ${A.fgGray}└─ ${A.dim}${msg}${rbg}`;
       break;
     }
   }
 
   // Pad to full width so the selected background covers the whole line
   const visLen = stripAnsi(content).length;
-  const pad = Math.max(0, cols - visLen);
+  const pad    = Math.max(0, cols - visLen);
   return content + " ".repeat(pad) + rst;
 }
 
@@ -441,8 +519,12 @@ function buildFrame(): string[] {
   const { cols, rows } = termSize();
   const lines: string[] = [];
 
-  // Row 1: title bar
-  lines.push(`${A.bold}${A.fgBlue} aid sessions ${A.reset}`);
+  // ── Row 1: title bar — full-width navy background ──────────────────────────
+  const titleText = " aid sessions";
+  const titlePad  = " ".repeat(Math.max(0, cols - stripAnsi(titleText).length));
+  lines.push(
+    `${A.bgTitleBar}${A.fgBrCyan}${A.bold}${titleText}${titlePad}${A.reset}`
+  );
 
   // Body area: rows minus title(1) + status(1) + footer(1) + spare(1)
   const bodyRows = Math.max(1, rows - 4);
@@ -466,6 +548,31 @@ function buildFrame(): string[] {
       ),
     );
 
+    // Pre-compute convIndex/convTotal for each item so renderItem can draw tree lines.
+    // A "group" is the run of conv/empty items after each session header.
+    const convMeta: Array<{ convIndex: number; convTotal: number }> =
+      state.items.map(() => ({ convIndex: 0, convTotal: 0 }));
+
+    {
+      let groupConvIndices: number[] = [];
+      const flush = () => {
+        const total = groupConvIndices.length;
+        groupConvIndices.forEach((idx, pos) => {
+          convMeta[idx] = { convIndex: pos, convTotal: total };
+        });
+        groupConvIndices = [];
+      };
+      for (let i = 0; i < state.items.length; i++) {
+        const k = state.items[i].kind.type;
+        if (k === "session" || k === "dead" || k === "sep") {
+          flush();
+        } else if (k === "conv" || k === "empty") {
+          groupConvIndices.push(i);
+        }
+      }
+      flush();
+    }
+
     const visible = state.items.slice(scrollStart, scrollStart + bodyRows);
     for (let i = 0; i < visible.length; i++) {
       const globalIdx = scrollStart + i;
@@ -476,13 +583,14 @@ function buildFrame(): string[] {
       // In rename mode: replace the cursor row with the inline input field
       if (isCursorItem && state.mode.type === "rename") {
         const indent = item.kind.type === "conv" ? "    " : "  ";
-        const input = state.mode.input;
-        const line = `${A.bgSelected}${indent}${A.bold}rename:${A.reset}${A.bgSelected} ${input}${A.fgBlue}█${A.reset}`;
+        const input  = state.mode.input;
+        const line   = `${A.bgSelected}${indent}${A.bold}rename:${A.reset}${A.bgSelected} ${input}${A.fgBrCyan}█${A.reset}`;
         const visLen = stripAnsi(line).length;
-        const pad = Math.max(0, cols - visLen);
+        const pad    = Math.max(0, cols - visLen);
         lines.push(line + " ".repeat(pad) + A.reset);
       } else {
-        lines.push(renderItem(item, isCursorItem, cols));
+        const { convIndex, convTotal } = convMeta[globalIdx];
+        lines.push(renderItem(item, isCursorItem, cols, convIndex, convTotal));
       }
     }
     // Pad body to bodyRows so footer stays pinned
@@ -494,7 +602,7 @@ function buildFrame(): string[] {
 
   // Status line
   if (state.statusMsg) {
-    lines.push(`  ${A.fgYellow}${state.statusMsg}${A.reset}`);
+    lines.push(`  ${A.fgBrYellow}${state.statusMsg}${A.reset}`);
   } else {
     lines.push("");
   }
@@ -522,30 +630,35 @@ function render(): void {
 }
 
 function buildFooter(mode: Mode, _cols: number): string {
+  const k  = (s: string) => `${A.reset}${A.bold}${A.fgBrCyan}${s}${A.reset}${A.dim}`;
+  const sep = `${A.fgGray}  ·  `;
   switch (mode.type) {
     case "nav":
     case "loading":
       return (
-        `  ${A.dim}` +
-        `${A.reset}${A.italic}enter${A.reset}${A.dim} open  ` +
-        `${A.italic}n${A.reset}${A.dim} new conv  ` +
-        `${A.italic}r${A.reset}${A.dim} rename  ` +
-        `${A.italic}d${A.reset}${A.dim} delete  ` +
-        `${A.italic}^r${A.reset}${A.dim} refresh  ` +
-        `${A.italic}q${A.reset}${A.dim} quit${A.reset}`
+        `${A.dim}  ` +
+        `${k("↑↓")} nav${sep}` +
+        `${k("↵")} open${sep}` +
+        `${k("n")} new${sep}` +
+        `${k("r")} rename${sep}` +
+        `${k("d")} delete${sep}` +
+        `${k("^r")} refresh${sep}` +
+        `${k("q")} quit` +
+        A.reset
       );
-    case "rename":  // input is shown inline on the row; footer shows rename hints
+    case "rename":
       return (
-        `  ${A.dim}` +
-        `${A.reset}${A.italic}enter${A.reset}${A.dim} confirm  ` +
-        `${A.italic}esc${A.reset}${A.dim} cancel${A.reset}`
+        `${A.dim}  ` +
+        `${k("↵")} confirm${sep}` +
+        `${k("esc")} cancel` +
+        A.reset
       );
     case "delete-confirm": {
       const label = itemLabel(mode.item);
       return (
-        `  ${A.fgRed}${A.bold}delete${A.reset} ` +
+        `  ${A.fgBrRed}${A.bold}delete${A.reset} ` +
         `${A.dim}${label}${A.reset}  ` +
-        `${A.bold}y${A.reset}${A.dim}/n?${A.reset}`
+        `${A.bold}${A.fgBrYellow}y${A.reset}${A.dim}/${A.reset}${A.bold}n${A.reset}${A.dim}?${A.reset}`
       );
     }
   }

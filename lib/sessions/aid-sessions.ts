@@ -473,8 +473,8 @@ function buildFooter(mode: Mode, _cols: number): string {
     case "loading":
       return (
         `  ${A.dim}` +
-        `${A.reset}${A.italic}enter${A.reset}${A.dim} select  ` +
-        `${A.italic}n${A.reset}${A.dim} new  ` +
+        `${A.reset}${A.italic}enter${A.reset}${A.dim} open  ` +
+        `${A.italic}n${A.reset}${A.dim} new conv  ` +
         `${A.italic}r${A.reset}${A.dim} rename  ` +
         `${A.italic}d${A.reset}${A.dim} delete  ` +
         `${A.italic}^r${A.reset}${A.dim} refresh  ` +
@@ -559,15 +559,15 @@ async function loadConversation(convId: string, session: string): Promise<void> 
 }
 
 async function newConversation(): Promise<void> {
-  const item = currentItem();
+  // Always create the new conversation in the current session (the one this
+  // navigator pane is running inside). We never spawn new aid sessions here.
   let targetSession = "";
-  if (item?.kind.type === "conv") targetSession = item.kind.session;
-  if (item?.kind.type === "session") targetSession = item.kind.session;
-  if (!targetSession && TMUX_PANE) {
+  if (TMUX_PANE) {
     targetSession = await tmuxOutput(
       "display-message", "-t", TMUX_PANE, "-p", "#{session_name}",
     );
   }
+  if (!targetSession) { setStatus("cannot determine current session"); return; }
 
   dbg("ACTN", `new conversation in session=${targetSession}`);
   const port = await orcPort(targetSession);
@@ -578,14 +578,6 @@ async function newConversation(): Promise<void> {
 
   dbg("ACTN", `new conv created id=${newId}`);
   await orcSelectConversation(port, newId);
-
-  const cur = TMUX_PANE
-    ? await tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{session_name}")
-    : "";
-  if (cur && cur !== targetSession) {
-    await switchToSession(targetSession);
-  }
-
   await refresh();
 }
 
@@ -694,7 +686,7 @@ function onEnter(): void {
   const item = currentItem();
   if (!item) return;
   switch (item.kind.type) {
-    case "session": switchToSession(item.kind.session); break;
+    case "session": break; // already in this session; n to add a conversation
     case "dead": resurrectSession(item.kind.session); break;
     case "conv": loadConversation(item.kind.convId, item.kind.session); break;
     default: break;

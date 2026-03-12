@@ -172,6 +172,21 @@ async function orcSelectConversation(port: number, sessionID: string): Promise<v
   } catch { /* best-effort */ }
 }
 
+async function orcRenameConversation(port: number, convId: string, title: string): Promise<boolean> {
+  if (!port || !convId) return false;
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/session/${convId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+      signal: AbortSignal.timeout(5000),
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function orcDeleteConversation(port: number, convId: string): Promise<void> {
   if (!port || !convId) return;
   try {
@@ -388,7 +403,7 @@ function renderItem(item: ListItem, selected: boolean, cols: number): string {
 
 type Mode =
   | { type: "nav" }
-  | { type: "rename"; session: string; input: string }
+  | { type: "rename"; target: { kind: "session"; session: string } | { kind: "conv"; convId: string; session: string }; input: string }
   | { type: "delete-confirm"; item: ListItem }
   | { type: "loading" };
 
@@ -609,30 +624,46 @@ async function newConversation(): Promise<void> {
   await refresh();
 }
 
-async function doRename(session: string, rawInput: string): Promise<void> {
+async function doRename(
+  target: { kind: "session"; session: string } | { kind: "conv"; convId: string; session: string },
+  rawInput: string,
+): Promise<void> {
+  if (target.kind === "conv") {
+    const title = rawInput.trim();
+    if (!title) return;
+    dbg("RENAME", `conv ${target.convId} -> "${title}"`);
+    const port = await orcPort(target.session);
+    const ok = await orcRenameConversation(port, target.convId, title);
+    if (!ok) { setStatus("rename failed"); return; }
+    dbg("RENAME", "conv rename done");
+    await refresh();
+    return;
+  }
+
+  // Session rename
   const newShortName = rawInput
     .trim()
     .replace(/[^a-zA-Z0-9\-_.]/g, "-")
     .replace(/-+$/, "");
   if (!newShortName) return;
 
-  const oldShortName = session.replace(/^aid@/, "");
+  const oldShortName = target.session.replace(/^aid@/, "");
   if (newShortName === oldShortName) return;
 
   const newSession = `aid@${newShortName}`;
   const exists = await tmuxRun("has-session", "-t", newSession);
   if (exists) { setStatus(`${newSession} already exists`); return; }
 
-  dbg("RENAME", `${session} -> ${newSession}`);
-  const ok = await tmuxRun("rename-session", "-t", session, newSession);
-  if (!ok) { setStatus(`rename failed`); return; }
+  dbg("RENAME", `${target.session} -> ${newSession}`);
+  const ok = await tmuxRun("rename-session", "-t", target.session, newSession);
+  if (!ok) { setStatus("rename failed"); return; }
 
   // Update metadata
   const allMeta = readMeta().map((m) =>
-    m.tmux_session === session ? { ...m, tmux_session: newSession } : m
+    m.tmux_session === target.session ? { ...m, tmux_session: newSession } : m
   );
   writeMeta(allMeta);
-  dbg("RENAME", `done`);
+  dbg("RENAME", "session rename done");
   await refresh();
 }
 
@@ -724,14 +755,27 @@ function onEnter(): void {
 function startRename(): void {
   const item = currentItem();
   if (!item) return;
-  let session = "";
-  if (item.kind.type === "session") session = item.kind.session;
-  else if (item.kind.type === "dead") session = item.kind.session;
-  else if (item.kind.type === "conv") session = item.kind.session;
-  if (!session) return;
-  const defaultName = session.replace(/^aid@/, "");
-  state.mode = { type: "rename", session, input: defaultName };
-  render();
+  if (item.kind.type === "conv") {
+    // Rename conversation — default to current title (strip the truncation ellipsis)
+    const rawTitle = item.kind.title.replace(/…$/, "");
+    state.mode = {
+      type: "rename",
+      target: { kind: "conv", convId: item.kind.convId, session: item.kind.session },
+      input: rawTitle,
+    };
+    render();
+    return;
+  }
+  if (item.kind.type === "session" || item.kind.type === "dead") {
+    const defaultName = item.kind.session.replace(/^aid@/, "");
+    state.mode = {
+      type: "rename",
+      target: { kind: "session", session: item.kind.session },
+      input: defaultName,
+    };
+    render();
+    return;
+  }
 }
 
 function startDelete(): void {
@@ -746,9 +790,9 @@ function handleRenameKey(key: Buffer): void {
   if (state.mode.type !== "rename") return;
   // Enter — commit
   if (key[0] === 0x0d || key[0] === 0x0a) {
-    const { session, input } = state.mode;
+    const { target, input } = state.mode;
     state.mode = { type: "nav" };
-    doRename(session, input);
+    doRename(target, input);
     return;
   }
   // Escape / Ctrl-C — cancel (bare ESC only; multi-byte ESC sequences are arrow keys etc.)
@@ -763,9 +807,9 @@ function handleRenameKey(key: Buffer): void {
     render();
     return;
   }
-  // Printable ASCII
+  // Printable chars (including unicode)
   const ch = key.toString("utf-8");
-  if (ch.length === 1 && key[0] >= 0x20) {
+  if (ch.length >= 1 && key[0] >= 0x20) {
     state.mode = { ...state.mode, input: state.mode.input + ch };
     render();
   }

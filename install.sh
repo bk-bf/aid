@@ -38,6 +38,12 @@ if command -v pacman &>/dev/null && ! command -v delta &>/dev/null; then
   sudo pacman -S --needed --noconfirm git-delta
 fi
 
+# Arch/CachyOS: bun is required by the aid-sessions.ts navigator
+if command -v pacman &>/dev/null && ! command -v bun &>/dev/null; then
+  echo "==> Installing bun..."
+  sudo pacman -S --needed --noconfirm bun
+fi
+
 # ── 2. TPM ───────────────────────────────────────────────────────────────────
 if [[ ! -d "$TPM_DIR" ]]; then
   echo "==> Installing TPM..."

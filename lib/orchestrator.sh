@@ -201,14 +201,14 @@ spawn_orc_session() {
     "OPENCODE_CONFIG_DIR=$(printf '%q' "$AID_DIR/opencode") OPENCODE_TUI_CONFIG=$(printf '%q' "$AID_DIR/opencode/tui.json") XDG_DATA_HOME=$(printf '%q' "$AID_DATA") opencode --port ${orc_port} $(printf '%q' "$repo_path")"
   _spawn_log "$debug_log" "orc_pane=${orc_pane} respawned (opencode)"
 
-  # Start the navigator in the left pane (aid-sessions: fzf-based navigator).
+  # Start the navigator in the left pane (aid-sessions.ts: TypeScript/Bun navigator).
   local nav_env
   nav_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}")"
   [[ -n "$debug_log" ]] && nav_env+=" AID_DEBUG_LOG=$(printf '%q' "$debug_log")"
-  _spawn_log "$debug_log" "respawn nav_pane=${nav_pane}: aid-sessions"
+  _spawn_log "$debug_log" "respawn nav_pane=${nav_pane}: aid-sessions.ts"
   tmux -L aid respawn-pane -k -t "$nav_pane" \
-    "${nav_env} $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions")"
-  _spawn_log "$debug_log" "nav_pane=${nav_pane} respawned (aid-sessions)"
+    "${nav_env} bun run $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions.ts")"
+  _spawn_log "$debug_log" "nav_pane=${nav_pane} respawned (aid-sessions.ts)"
 
   # Start the debug log viewer if in debug mode.
   if [[ -n "$dbg_pane" && -n "$debug_log" ]]; then

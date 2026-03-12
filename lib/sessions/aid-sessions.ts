@@ -472,7 +472,18 @@ function buildFrame(): string[] {
       const item = visible[i];
       const isCursorItem =
         item.selectable && selectableIndices[state.cursor] === globalIdx;
-      lines.push(renderItem(item, isCursorItem, cols));
+
+      // In rename mode: replace the cursor row with the inline input field
+      if (isCursorItem && state.mode.type === "rename") {
+        const indent = item.kind.type === "conv" ? "    " : "  ";
+        const input = state.mode.input;
+        const line = `${A.bgSelected}${indent}${A.bold}rename:${A.reset}${A.bgSelected} ${input}${A.fgBlue}█${A.reset}`;
+        const visLen = stripAnsi(line).length;
+        const pad = Math.max(0, cols - visLen);
+        lines.push(line + " ".repeat(pad) + A.reset);
+      } else {
+        lines.push(renderItem(item, isCursorItem, cols));
+      }
     }
     // Pad body to bodyRows so footer stays pinned
     while (lines.length < 1 + bodyRows) lines.push("");
@@ -523,8 +534,12 @@ function buildFooter(mode: Mode, _cols: number): string {
         `${A.italic}^r${A.reset}${A.dim} refresh  ` +
         `${A.italic}q${A.reset}${A.dim} quit${A.reset}`
       );
-    case "rename":
-      return `  ${A.bold}rename:${A.reset} ${mode.input}${A.fgBlue}█${A.reset}`;
+    case "rename":  // input is shown inline on the row; footer shows rename hints
+      return (
+        `  ${A.dim}` +
+        `${A.reset}${A.italic}enter${A.reset}${A.dim} confirm  ` +
+        `${A.italic}esc${A.reset}${A.dim} cancel${A.reset}`
+      );
     case "delete-confirm": {
       const label = itemLabel(mode.item);
       return (

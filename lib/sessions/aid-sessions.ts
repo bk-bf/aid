@@ -103,55 +103,88 @@ function metaFor(session: string): SessionMeta | undefined {
   return readMeta().find((m) => m.tmux_session === session);
 }
 
-// ── Session ownership map ─────────────────────────────────────────────────────
+// ── Session ownership via workspace_id ───────────────────────────────────────
 //
-// Maps opencode conv ID → aid tmux session name.
-// Written to $AID_DATA/opencode/session-owners.json and updated whenever we
-// fetch a live port's session list (which is the authoritative source for
-// which convs belong to which aid session).
-// Used to filter SQLite results for offline sessions.
+// opencode's `session` table has a `workspace_id` column that is indexed but
+// always NULL. We repurpose it to store the aid tmux session name, using a
+// strict first-writer-wins rule (never overwrite a non-NULL value). This means:
+//
+//   • When orcConversations() gets a live list from the HTTP API, any conv that
+//     has workspace_id IS NULL gets tagged with the current tmux session name.
+//   • Convs already tagged (workspace_id IS NOT NULL) keep their owner.
+//   • Filtering is then just: WHERE workspace_id = <tmuxSession> (or IS NULL for
+//     the very first boot before any tagging has happened for that session).
+//
+// Because we never overwrite, restarting an aid session under the same name
+// correctly re-adopts all previously-tagged convs. Two instances running from
+// the same directory race to tag new convs — first writer wins, which is fine
+// because opencode only surfaces a new conv to the instance that created it
+// first (the creator's navigator will win the write).
 
-const OWNERS_PATH = join(AID_DATA, "opencode/session-owners.json");
+const OPENCODE_DB = join(AID_DATA, "opencode/opencode.db");
 
-function readOwners(): Record<string, string> {
-  try { return JSON.parse(readFileSync(OWNERS_PATH, "utf-8")); } catch { return {}; }
-}
-
-function writeOwners(owners: Record<string, string>): void {
-  try { writeFileSync(OWNERS_PATH, JSON.stringify(owners, null, 2)); } catch { /* best-effort */ }
-}
-
-/** Tag all conv IDs returned by a live port as belonging to `tmuxSession`. Persists to disk. */
-function tagConvOwners(convIds: string[], tmuxSession: string): void {
-  const owners = readOwners();
-  let changed = false;
-  for (const id of convIds) {
-    if (owners[id] !== tmuxSession) { owners[id] = tmuxSession; changed = true; }
-  }
-  if (changed) writeOwners(owners);
-}
-
-/** Return conv IDs owned by `tmuxSession` according to the persisted owner map. */
-function ownedConvIds(tmuxSession: string): Set<string> {
-  const owners = readOwners();
-  return new Set(Object.entries(owners).filter(([, s]) => s === tmuxSession).map(([id]) => id));
-}
-
-/** Read convs from SQLite filtered to those owned by `tmuxSession`. */
-function convosFromDbForSession(tmuxSession: string): OrcConversation[] {
-  const ids = ownedConvIds(tmuxSession);
-  if (ids.size === 0) return [];
-  const dbPath = join(AID_DATA, "opencode/opencode.db");
+/**
+ * Tag convs that are still unowned (workspace_id IS NULL) as belonging to
+ * `tmuxSession`. Skips convs that already have an owner. Writes directly to
+ * the shared SQLite DB with first-writer-wins semantics.
+ */
+function tagConvsInDb(convIds: string[], tmuxSession: string): void {
+  if (convIds.length === 0) return;
   try {
-    const db = new Database(dbPath, { readonly: true, create: false });
+    const db = new Database(OPENCODE_DB, { create: false });
     try {
-      // SQLite doesn't support array binding — build placeholders dynamically.
-      const placeholders = Array.from(ids).map(() => "?").join(",");
+      // Only update rows where workspace_id is still NULL — never overwrite.
+      const placeholders = convIds.map(() => "?").join(",");
+      db.run(
+        `UPDATE session SET workspace_id = ? WHERE id IN (${placeholders}) AND workspace_id IS NULL`,
+        [tmuxSession, ...convIds],
+      );
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    dbg("SQLITE", `tagConvsInDb failed: ${e}`);
+  }
+}
+
+/**
+ * Read the workspace_id for a set of conv IDs.
+ * Returns a map of id → workspace_id (only includes rows that have a non-NULL value).
+ */
+function readConvOwners(convIds: string[]): Map<string, string> {
+  const result = new Map<string, string>();
+  if (convIds.length === 0) return result;
+  try {
+    const db = new Database(OPENCODE_DB, { readonly: true, create: false });
+    try {
+      const placeholders = convIds.map(() => "?").join(",");
       const rows = db
-        .query<{ id: string; title: string; directory: string; time_updated: number }, string[]>(
-          `SELECT id, title, directory, time_updated FROM session WHERE time_archived IS NULL AND id IN (${placeholders}) ORDER BY time_updated DESC`,
+        .query<{ id: string; workspace_id: string }, string[]>(
+          `SELECT id, workspace_id FROM session WHERE id IN (${placeholders}) AND workspace_id IS NOT NULL`,
         )
-        .all(...Array.from(ids));
+        .all(...convIds);
+      for (const r of rows) result.set(r.id, r.workspace_id);
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    dbg("SQLITE", `readConvOwners failed: ${e}`);
+  }
+  return result;
+}
+
+/** Read convs from SQLite owned by `tmuxSession` (workspace_id = tmuxSession). */
+function convosFromDbForSession(tmuxSession: string): OrcConversation[] {
+  try {
+    const db = new Database(OPENCODE_DB, { readonly: true, create: false });
+    try {
+      const rows = db
+        .query<{ id: string; title: string; directory: string; time_updated: number }, [string]>(
+          `SELECT id, title, directory, time_updated FROM session
+           WHERE time_archived IS NULL AND workspace_id = ?
+           ORDER BY time_updated DESC`,
+        )
+        .all(tmuxSession);
       return rows.map((r) => ({ id: r.id, title: r.title, directory: r.directory, time: { updated: r.time_updated } }));
     } finally {
       db.close();
@@ -168,52 +201,6 @@ interface OrcConversation {
   title?: string;
   time: { updated: number };
   directory?: string;
-}
-
-/**
- * Return the epoch-ms timestamp at which the process listening on `port` started.
- * Uses `ss -tlnp` to find the PID, then reads /proc/<pid>/stat field 22
- * (starttime in clock ticks since boot), and converts using /proc/uptime.
- * Returns 0 on any failure (caller should treat 0 as "don't filter").
- */
-async function processStartTimeMs(port: number): Promise<number> {
-  if (!port) return 0;
-  try {
-    // Find PID: ss -tlnp output contains  users:(("opencode",pid=NNNN,fd=...))
-    const proc = Bun.spawn(["ss", "-tlnp", `sport = :${port}`], {
-      stdout: "pipe", stderr: "ignore",
-    });
-    const ssOut = await new Response(proc.stdout).text();
-    await proc.exited;
-    const pidMatch = ssOut.match(/pid=(\d+)/);
-    if (!pidMatch) return 0;
-    const pid = pidMatch[1];
-
-    // Read /proc/<pid>/stat — field 22 (0-indexed: 21) is starttime in jiffies
-    const statRaw = readFileSync(`/proc/${pid}/stat`, "utf-8");
-    // stat fields are space-separated; field[1] (comm) may contain spaces inside
-    // parens, so we strip it out first.
-    const statStripped = statRaw.replace(/\(.*?\)/, "()");
-    const fields = statStripped.trim().split(/\s+/);
-    const startTicks = parseInt(fields[21], 10);
-    if (isNaN(startTicks)) return 0;
-
-    // CLK_TCK is almost always 100 on Linux; avoid spawning getconf on every call.
-    const CLK_TCK = 100;
-
-    // /proc/uptime: "<uptime_seconds> <idle_seconds>"
-    const uptimeRaw = readFileSync("/proc/uptime", "utf-8");
-    const uptimeSec = parseFloat(uptimeRaw.trim().split(/\s+/)[0]);
-    if (isNaN(uptimeSec)) return 0;
-
-    // boot time in ms
-    const bootMs = Date.now() - uptimeSec * 1000;
-    // process start offset from boot in ms
-    const startOffsetMs = (startTicks / CLK_TCK) * 1000;
-    return Math.floor(bootMs + startOffsetMs);
-  } catch {
-    return 0;
-  }
 }
 
 /** Compute the deterministic opencode port for a session name (mirrors orchestrator.sh). */
@@ -245,35 +232,30 @@ async function orcPort(session: string): Promise<number> {
 async function orcConversations(port: number, tmuxSession: string): Promise<OrcConversation[]> {
   if (port) {
     try {
-      const [resp, startMs] = await Promise.all([
-        fetch(`http://127.0.0.1:${port}/session`, {
-          headers: { Accept: "application/json" },
-          signal: AbortSignal.timeout(2000),
-        }),
-        processStartTimeMs(port),
-      ]);
+      const resp = await fetch(`http://127.0.0.1:${port}/session`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(2000),
+      });
       if (resp.ok) {
         const all = (await resp.json()) as OrcConversation[];
-        // Filter to only convs that were created after this opencode process started.
-        // This is the reliable way to isolate sessions that share the same directory/DB.
-        const owned = startMs > 0
-          ? all.filter((c) => {
-              // time.updated is always set; time.created may not be in the type but
-              // the opencode API returns it — fall back to time.updated if absent.
-              const created: number = (c as any).time?.created ?? c.time.updated;
-              return created >= startMs;
-            })
-          : all;
+        // Tag unowned convs in the DB (first-writer-wins, never overwrites).
+        // This must happen before we filter so that newly created convs get claimed.
+        tagConvsInDb(all.map((c) => c.id), tmuxSession);
+        // Now read back the actual ownership from DB and keep only ours.
+        const owners = readConvOwners(all.map((c) => c.id));
+        const owned = all.filter((c) => {
+          const owner = owners.get(c.id);
+          // Keep if we own it, OR if it's still untagged (race window: tag write
+          // may not be visible yet in a concurrent read — show it optimistically).
+          return !owner || owner === tmuxSession;
+        });
         const sorted = owned.sort((a, b) => b.time.updated - a.time.updated);
-        dbg("ORC", `port=${port} startMs=${startMs} all=${all.length} owned=${owned.length}`);
-        // Tag ownership with the time-filtered set only — last tagger won't pollute
-        // another instance's convs since we only see this instance's convs now.
-        if (sorted.length > 0) tagConvOwners(sorted.map((c) => c.id), tmuxSession);
+        dbg("ORC", `port=${port} all=${all.length} owned=${owned.length}`);
         return sorted;
       }
     } catch { /* fall through to DB */ }
   }
-  // Port offline — use the persisted owner map to filter the shared SQLite DB.
+  // Port offline — query SQLite directly by workspace_id.
   return convosFromDbForSession(tmuxSession);
 }
 
@@ -1192,7 +1174,7 @@ async function newConversation(): Promise<void> {
   if (!newId) { setStatus("failed to create conversation"); render(); return; }
 
   dbg("ACTN", `new conv created id=${newId}`);
-  tagConvOwners([newId], targetSession);
+  tagConvsInDb([newId], targetSession);
   await orcSelectConversation(port, newId);
   await refresh();
 }

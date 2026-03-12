@@ -820,6 +820,14 @@ async function loadConversation(convId: string, session: string): Promise<void> 
   const port = await orcPort(session);
   if (!port) { setStatus("no opencode port for session"); return; }
 
+  // Optimistically update the active marker in state immediately — no round-trip.
+  // This gives instant visual feedback before the tmux env write completes.
+  for (const item of state.items) {
+    if (item.kind.type !== "conv" || item.kind.session !== session) continue;
+    item.kind.active = item.kind.convId === convId;
+  }
+  render();
+
   await tmuxRun("set-environment", "-t", session, "AID_ORC_ACTIVE_CONV", convId);
   await orcSelectConversation(port, convId);
 
@@ -1121,7 +1129,7 @@ function handleNavKey(key: Buffer): void {
   if (ch === "k") { moveCursor(-1); refreshActiveConvs().catch(() => {}); return; }
 
   // Enter
-  if (key[0] === 0x0d || key[0] === 0x0a) { onEnter(); refreshActiveConvs().catch(() => {}); return; }
+  if (key[0] === 0x0d || key[0] === 0x0a) { onEnter(); return; }
 
   // n — new conversation
   if (ch === "n") { newConversation(); return; }

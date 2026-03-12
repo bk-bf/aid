@@ -277,6 +277,11 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 function startWatcher(): void {
   // inotifywait -m -r -q: monitor recursively, quiet, machine-readable
   // Events: close_write (file saved), create, delete, move
+  // Exclude aid debug log files (log-*.txt in repo root) to avoid a
+  // self-triggering event storm from the log file being written each refresh.
+  // inotifywait --exclude matches against the full path, so we anchor with
+  // the repo root prefix.
+  const excludePattern = `${AID_ORC_REPO}/log-[^/]+\\.txt`;
   try {
     const proc = Bun.spawn(
       [
@@ -284,6 +289,7 @@ function startWatcher(): void {
         "-m", "-r", "-q",
         "--format", "%e",
         "-e", "close_write,create,delete,move",
+        "--exclude", excludePattern,
         AID_ORC_REPO,
       ],
       { stdout: "pipe", stderr: "ignore", stdin: "ignore" },

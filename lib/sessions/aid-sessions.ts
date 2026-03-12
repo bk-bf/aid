@@ -195,13 +195,19 @@ function convosFromDbForSession(tmuxSession: string): OrcConversation[] {
     try {
       const placeholders = ids.map(() => "?").join(",");
       const rows = oc
-        .query<{ id: string; title: string; directory: string; time_updated: number }, string[]>(
-          `SELECT id, title, directory, time_updated FROM session
+        .query<{ id: string; title: string; directory: string; time_updated: number; parent_id: string | null }, string[]>(
+          `SELECT id, title, directory, time_updated, parent_id FROM session
            WHERE time_archived IS NULL AND id IN (${placeholders})
            ORDER BY time_updated DESC`,
         )
         .all(...ids);
-      return rows.map((r) => ({ id: r.id, title: r.title, directory: r.directory, time: { updated: r.time_updated } }));
+      return rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        directory: r.directory,
+        time: { updated: r.time_updated },
+        ...(r.parent_id ? { parentID: r.parent_id } : {}),
+      }));
     } finally {
       oc.close();
     }
@@ -220,6 +226,8 @@ interface OrcConversation {
   time: { updated: number };
   directory?: string;
   status?: ConvStatus;
+  /** Set on subagent/child sessions; absent on root sessions. */
+  parentID?: string;
 }
 
 /** Compute the deterministic opencode port for a session name (mirrors orchestrator.sh). */
@@ -535,7 +543,7 @@ async function switchToForeignConv(
 
 type ItemKind =
   | { type: "session"; session: string; isCurrent: boolean }
-  | { type: "conv"; convId: string; session: string; title: string; age: string; active: boolean; status: ConvStatus }
+  | { type: "conv"; convId: string; session: string; title: string; age: string; active: boolean; status: ConvStatus; isSubagent: boolean; parentConvId: string | undefined }
   | { type: "dead"; session: string; age: string }
   | { type: "sep" }
   | { type: "empty"; reason: "no-convs" | "no-sessions" };
@@ -624,7 +632,46 @@ async function buildList(): Promise<ListItem[]> {
     if (convs.length === 0) {
       items.push({ kind: { type: "empty", reason: "no-convs" }, selectable: false });
     } else {
-      for (const conv of convs) {
+      // Separate root convs from subagent convs
+      const rootConvs = convs.filter((c) => !c.parentID);
+      const subagentsByParent = new Map<string, OrcConversation[]>();
+      for (const c of convs) {
+        if (c.parentID) {
+          const bucket = subagentsByParent.get(c.parentID) ?? [];
+          bucket.push(c);
+          subagentsByParent.set(c.parentID, bucket);
+        }
+      }
+      // Sort each subagent bucket newest-first
+      for (const bucket of subagentsByParent.values()) {
+        bucket.sort((a, b) => b.time.updated - a.time.updated);
+      }
+
+      // Orphaned subagents (parent not in this session's conv list) — treat as root
+      const convIdSet = new Set(convs.map((c) => c.id));
+      const orphanedSubagents: OrcConversation[] = [];
+      for (const [parentId, bucket] of subagentsByParent.entries()) {
+        if (!convIdSet.has(parentId)) {
+          orphanedSubagents.push(...bucket);
+        }
+      }
+
+      // Build the ordered flat list: root → its subagents → next root → ...
+      const ordered: Array<{ conv: OrcConversation; isSubagent: boolean }> = [];
+      for (const root of rootConvs) {
+        ordered.push({ conv: root, isSubagent: false });
+        const children = subagentsByParent.get(root.id) ?? [];
+        if (!state.hideSubagents) {
+          for (const child of children) {
+            ordered.push({ conv: child, isSubagent: true });
+          }
+        }
+      }
+      for (const c of orphanedSubagents) {
+        ordered.push({ conv: c, isSubagent: false });
+      }
+
+      for (const { conv, isSubagent } of ordered) {
         const raw = conv.title ?? "(untitled)";
         const title = raw.length > 48 ? raw.slice(0, 47) + "…" : raw;
         items.push({
@@ -636,6 +683,8 @@ async function buildList(): Promise<ListItem[]> {
             age: relativeTime(conv.time.updated),
             active: conv.id === activeConvId,
             status: statuses.get(conv.id) ?? "idle",
+            isSubagent,
+            parentConvId: conv.parentID,
           },
           selectable: true,
         });
@@ -818,6 +867,10 @@ function renderItem(
   convIndex = 0,
   /** total number of convs in this session's group */
   convTotal = 0,
+  /** For subagent rows: true if the parent root conv has more root siblings after it */
+  parentHasMoreRoots = false,
+  /** For subagent rows: true if this is the last subagent under its parent */
+  isLastSubagent = false,
 ): string[] {
   const rst = A.reset;
 
@@ -879,8 +932,52 @@ function renderItem(
 
     // ── conversation row ──────────────────────────────────────────────────────
     case "conv": {
-      const { title, age, active, status } = item.kind;
+      const { title, age, active, status, isSubagent } = item.kind;
 
+      // ── subagent thread ────────────────────────────────────────────────────
+      if (isSubagent) {
+        // Continuation char: │ when the parent root has more root siblings below it,
+        // space (blank) when the parent is the last root in this group.
+        const contChar = parentHasMoreRoots
+          ? `${A.fgLavender}│${rfg}`
+          : ` `;
+
+        // ↳ arrow prefix for subagent rows
+        const arrow = `${A.fgGray}${A.dim}↳${rfg} `;
+
+        const marker = active
+          ? `${A.fgPurple}${A.bold}●${rfg} `
+          : `${A.fgGray}${A.dim}○${rfg} `;
+
+        const titleFmt = active ? `${A.bold}${A.fgWhite}` : `${A.dim}`;
+
+        // Layout: <selBar> <contChar>   <arrow><marker><title>
+        // Indent under the parent tree: selBar(1) + sp(1) + contChar(1) + "  "(2) = 5 chars before arrow
+        const titleLine = `${selBg}${selBar} ${contChar}    ${arrow}${marker}${titleFmt}${title}${rfg}`;
+        const titleRight = `${A.fgGray}${A.dim}${age}`;
+        const line1 = padLine(rightAlign(titleLine, titleRight, cols));
+
+        if (status !== "idle") {
+          // Continuation below subagent row:
+          // if parentHasMoreRoots → keep │ under contChar; if isLastSubagent → space, else │
+          const subContChar = parentHasMoreRoots
+            ? `${A.fgLavender}│${rfg}`
+            : ` `;
+          const subContChar2 = isLastSubagent
+            ? ` `
+            : `${A.fgLavender}│${rfg}`;
+          const statusLabel =
+            status === "busy" ? `${A.fgAmber}• Working${rfg}` :
+            /* retry */         `${A.fgRed}↺ Retry${rfg}`;
+          // Align under arrow+marker: selBar(1) + sp(1) + contChar(1) + "  "(2) + contChar2(1) + "  "(2) = 8 chars
+          const line2 = padLine(`${selBg}${selBar} ${subContChar}    ${subContChar2}   ${A.dim}${statusLabel}${rfg}`);
+          return [line1, line2];
+        }
+
+        return [line1];
+      }
+
+      // ── root conversation row ──────────────────────────────────────────────
       const isLast   = convIndex === convTotal - 1;
       const treeChar = isLast ? "└─" : "├─";
       // Tree connector: lavender
@@ -955,6 +1052,8 @@ interface AppState {
   statusMsg: string;
   /** When true (default), each session only shows convs it owns. Toggle with 'f'. */
   filterBySession: boolean;
+  /** When true, subagent/child threads are hidden from the list. Toggle with 's'. */
+  hideSubagents: boolean;
 }
 
 const state: AppState = {
@@ -964,6 +1063,7 @@ const state: AppState = {
   refreshing: false,
   statusMsg: "",
   filterBySession: true,
+  hideSubagents: false,
 };
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -1025,15 +1125,57 @@ function buildFrame(): string[] {
 
     // Pre-compute convIndex/convTotal for each item so renderItem can draw tree lines.
     // A "group" is the run of conv/empty items after each session header.
-    const convMeta: Array<{ convIndex: number; convTotal: number }> =
-      state.items.map(() => ({ convIndex: 0, convTotal: 0 }));
+    // For subagent convs we also need to know whether there are more root convs
+    // after them in the same group (so they can draw the right continuation char).
+    const convMeta: Array<{
+      convIndex: number;
+      convTotal: number;
+      /** For subagent rows: true if the parent root conv has more root siblings after it. */
+      parentHasMoreRoots: boolean;
+      /** For subagent rows: true if this is the last subagent under its parent. */
+      isLastSubagent: boolean;
+    }> = state.items.map(() => ({
+      convIndex: 0,
+      convTotal: 0,
+      parentHasMoreRoots: false,
+      isLastSubagent: false,
+    }));
 
     {
       let groupConvIndices: number[] = [];
       const flush = () => {
         const total = groupConvIndices.length;
+
+        // Find all root conv positions within this group
+        const rootPositions: number[] = [];
+        for (let pos = 0; pos < groupConvIndices.length; pos++) {
+          const item = state.items[groupConvIndices[pos]];
+          if (item.kind.type === "conv" && !item.kind.isSubagent) {
+            rootPositions.push(pos);
+          }
+        }
+
         groupConvIndices.forEach((idx, pos) => {
-          convMeta[idx] = { convIndex: pos, convTotal: total };
+          const item = state.items[idx];
+          let parentHasMoreRoots = false;
+          let isLastSubagent = false;
+
+          if (item.kind.type === "conv" && item.kind.isSubagent) {
+            // Find which root owns this subagent (the most recent root conv at pos < this pos)
+            const parentRootPos = rootPositions.filter((rp) => rp < pos).at(-1) ?? -1;
+            if (parentRootPos >= 0) {
+              // Are there any more root convs after this parent root?
+              const nextRootIdx = rootPositions.findIndex((rp) => rp > parentRootPos);
+              parentHasMoreRoots = nextRootIdx >= 0;
+              // Is this the last subagent under this parent?
+              // The next item is either another subagent of same parent or a root/sep.
+              const nextPos = pos + 1;
+              const nextItem = nextPos < groupConvIndices.length ? state.items[groupConvIndices[nextPos]] : null;
+              isLastSubagent = !nextItem || nextItem.kind.type !== "conv" || !nextItem.kind.isSubagent;
+            }
+          }
+
+          convMeta[idx] = { convIndex: pos, convTotal: total, parentHasMoreRoots, isLastSubagent };
         });
         groupConvIndices = [];
       };
@@ -1088,15 +1230,16 @@ function buildFrame(): string[] {
 
       // In rename mode: replace the cursor row with the inline input field
       if (isCursorItem && state.mode.type === "rename") {
-        const indent = item.kind.type === "conv" ? "    " : "  ";
+        const indent = item.kind.type === "conv" && item.kind.isSubagent ? "        " :
+                      item.kind.type === "conv" ? "    " : "  ";
         const input  = state.mode.input;
         const line   = `${A.bgSelected}${indent}${A.bold}rename:${A.reset}${A.bgSelected} ${input}${A.fgPurple}█${A.reset}`;
         const visLen = stripAnsi(line).length;
         const pad    = Math.max(0, cols - visLen);
         itemLines = [line + " ".repeat(pad) + A.reset];
       } else {
-        const { convIndex, convTotal } = convMeta[i];
-        itemLines = renderItem(item, isCursorItem, cols, convIndex, convTotal);
+        const { convIndex, convTotal, parentHasMoreRoots, isLastSubagent } = convMeta[i];
+        itemLines = renderItem(item, isCursorItem, cols, convIndex, convTotal, parentHasMoreRoots, isLastSubagent);
       }
 
       for (const l of itemLines) {
@@ -1160,6 +1303,7 @@ function buildFooter(mode: Mode, cols: number): string[] {
         { key: "r",  label: "rename" },
         { key: "d",  label: "delete" },
         { key: "f",  label: "filter" },
+        { key: "s",  label: "subagents" },
         { key: "^r", label: "refresh" },
         { key: "q",  label: "quit" },
       ];
@@ -1312,7 +1456,7 @@ async function newConversation(): Promise<void> {
   // Optimistic: insert a placeholder conv at the top of this session's group
   const placeholderId = "__placeholder__";
   const placeholder: ListItem = {
-    kind: { type: "conv", convId: placeholderId, session: targetSession, title: "new conversation…", age: "now", active: false, status: "idle" as ConvStatus },
+    kind: { type: "conv", convId: placeholderId, session: targetSession, title: "new conversation…", age: "now", active: false, status: "idle" as ConvStatus, isSubagent: false, parentConvId: undefined },
     selectable: false,
   };
   // Insert after the session header (first item for this session), before existing convs
@@ -1660,6 +1804,14 @@ function handleNavKey(key: Buffer): void {
   if (ch === "f") {
     state.filterBySession = !state.filterBySession;
     setStatus(state.filterBySession ? "filter: on" : "filter: off (showing all)");
+    refresh();
+    return;
+  }
+
+  // s — toggle subagent thread visibility
+  if (ch === "s") {
+    state.hideSubagents = !state.hideSubagents;
+    setStatus(state.hideSubagents ? "subagents: hidden" : "subagents: visible");
     refresh();
     return;
   }

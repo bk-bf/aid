@@ -275,7 +275,9 @@ let watcherProc: ReturnType<typeof Bun.spawn> | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function startWatcher(): void {
-  const excludePattern = `${AID_ORC_REPO}/log-[^/]+\\.txt`;  // --exclude matches full path, not bare filename
+  // Exclude .git/ internals (would cause infinite refresh loop since git
+  // writes to .git/ during diff) and log-*.txt files.
+  const excludePattern = `${AID_ORC_REPO}/(\\.git|log-[^/]+\\.txt)`;
   try {
     const proc = Bun.spawn(
       [
@@ -300,7 +302,7 @@ function startWatcher(): void {
         let buf = "";
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done) break;  // inotifywait exited — fall through to restart
           buf += decoder.decode(value, { stream: true });
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {
@@ -309,10 +311,10 @@ function startWatcher(): void {
             if (evt) scheduleRefresh("watch:" + evt);
           }
         }
-      } catch {
-        // Watcher died — try to restart after a short delay.
-        setTimeout(() => { startWatcher(); }, 2000);
-      }
+      } catch { /* fall through to restart */ }
+      // Watcher died or exited cleanly — restart after a short delay.
+      dbg("WATCH", "inotifywait exited — restarting in 2s");
+      setTimeout(() => { startWatcher(); }, 2000);
     })();
 
     dbg("WATCH", `inotifywait started on ${AID_ORC_REPO}`);
@@ -361,10 +363,12 @@ const state: AppState = {
 // ── Data refresh ──────────────────────────────────────────────────────────────
 
 let refreshing = false;
+let pendingRefresh = false;  // a refresh was requested while one was in flight
 
 async function refresh(): Promise<void> {
-  if (refreshing) return;
+  if (refreshing) { pendingRefresh = true; return; }
   refreshing = true;
+  pendingRefresh = false;
   dbg("DATA", `refresh diffMode=${state.diffMode}`);
 
   try {
@@ -377,6 +381,7 @@ async function refresh(): Promise<void> {
       state.mode = "view";
       refreshing = false;
       render();
+      if (pendingRefresh) void refresh();
       return;
     }
 
@@ -407,10 +412,14 @@ async function refresh(): Promise<void> {
     for (const file of state.expanded) {
       void fetchDiff(file);
     }
+
+    // If a refresh was requested while we were running, honour it now.
+    if (pendingRefresh) void refresh();
   } catch (e) {
     dbg("ERR", `refresh failed: ${e}`);
     refreshing = false;
     render();
+    if (pendingRefresh) void refresh();
   }
 }
 

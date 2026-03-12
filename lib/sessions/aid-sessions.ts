@@ -818,7 +818,7 @@ function renderItem(
   convIndex = 0,
   /** total number of convs in this session's group */
   convTotal = 0,
-): string {
+): string[] {
   const rst = A.reset;
 
   // Selection is shown as a purple left-edge bar (▌) so the full-line background
@@ -830,6 +830,13 @@ function renderItem(
   // rfg: restore only the bg after an inline fg color change — does NOT reset bold/dim.
   // \x1b[39m = "default foreground color" (fg reset only).
   const rfg = `\x1b[39m${selBg}`;
+
+  /** Pad a single rendered line to full width and return it. */
+  const padLine = (s: string): string => {
+    const visLen = stripAnsi(s).length;
+    const pad    = Math.max(0, cols - visLen);
+    return s + " ".repeat(pad) + rst;
+  };
 
   let content = "";
 
@@ -887,25 +894,35 @@ function renderItem(
       // Title: bright white when active, muted otherwise; bold preserved via rfg
       const titleFmt = active ? `${A.bold}${A.fgWhite}` : `${A.dim}`;
 
-      const left  = `${selBg}${selBar} ${treePfx} ${marker}${titleFmt}${title}${rfg}`;
+      const titleLine = `${selBg}${selBar} ${treePfx} ${marker}${titleFmt}${title}${rfg}`;
+      // Age always right-aligned on the title line
+      const titleRight = `${A.fgGray}${A.dim}${age}`;
+      const line1 = padLine(rightAlign(titleLine, titleRight, cols));
 
-      // Status indicator (Codex terminology): shown before age when not idle.
-      //   busy  → amber • Working   (agent is generating / tools are running)
-      //   retry → red   ↺ Retry     (request failed, retrying)
-      //   idle  → nothing           (Codex style: no indicator when waiting)
-      const statusPfx =
-        status === "busy"  ? `${A.fgAmber}• Working${rfg}  ` :
-        status === "retry" ? `${A.fgRed}↺ Retry${rfg}  `   :
-        "";
-      const right = `${statusPfx}${A.fgGray}${A.dim}${age}`;
-      content = rightAlign(left, right, cols);
-      break;
+      // Status second line — only rendered when not idle.
+      // Visual structure:
+      //   <selBar> <contChar>   <statusLabel>
+      // contChar: │ when not last (tree continues), space when last.
+      // Indented to align under the title text (selBar=1, sp=1, tree=2, sp=1 → 5 chars).
+      if (status !== "idle") {
+        const contChar = isLast
+          ? `${A.fgLavender} ${rfg}`         // last conv — no continuation bar
+          : `${A.fgLavender}│${rfg}`;         // more convs below — vertical bar
+        const statusLabel =
+          status === "busy"  ? `${A.fgAmber}• Working${rfg}` :
+          /* retry */          `${A.fgRed}↺ Retry${rfg}`;
+        // 5-char indent mirrors: selBar(1) + sp(1) + treeChar(2) + sp(1)
+        const line2 = padLine(`${selBg}${selBar} ${contChar}    ${A.dim}${statusLabel}${rfg}`);
+        return [line1, line2];
+      }
+
+      return [line1];
     }
 
     // ── separator between session groups ─────────────────────────────────────
     case "sep": {
       // Blue tinted dim rule (matches title bar hue)
-      return `${A.fgBlue}${A.dim}${"─".repeat(cols)}${rst}`;
+      return [`${A.fgBlue}${A.dim}${"─".repeat(cols)}${rst}`];
     }
 
     // ── empty placeholder ─────────────────────────────────────────────────────
@@ -919,9 +936,7 @@ function renderItem(
   }
 
   // Pad to full width so the selected background covers the whole line
-  const visLen = stripAnsi(content).length;
-  const pad    = Math.max(0, cols - visLen);
-  return content + " ".repeat(pad) + rst;
+  return [padLine(content)];
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1008,15 +1023,6 @@ function buildFrame(): string[] {
 
     const cursorItemIdx = selectableIndices[state.cursor] ?? 0;
 
-    // Scroll: keep cursor vertically centered
-    const scrollStart = Math.max(
-      0,
-      Math.min(
-        cursorItemIdx - Math.floor(bodyRows / 2),
-        Math.max(0, state.items.length - bodyRows),
-      ),
-    );
-
     // Pre-compute convIndex/convTotal for each item so renderItem can draw tree lines.
     // A "group" is the run of conv/empty items after each session header.
     const convMeta: Array<{ convIndex: number; convTotal: number }> =
@@ -1042,12 +1048,43 @@ function buildFrame(): string[] {
       flush();
     }
 
-    const visible = state.items.slice(scrollStart, scrollStart + bodyRows);
-    for (let i = 0; i < visible.length; i++) {
-      const globalIdx = scrollStart + i;
-      const item = visible[i];
-      const isCursorItem =
-        item.selectable && selectableIndices[state.cursor] === globalIdx;
+    // Compute screen-line height per item.
+    // Conv items with a non-idle status take 2 lines; everything else takes 1.
+    const lineHeight = state.items.map((item) =>
+      item.kind.type === "conv" && item.kind.status !== "idle" ? 2 : 1,
+    );
+
+    // lineOffset[i] = total screen lines before item i (0-based).
+    const lineOffset: number[] = new Array(state.items.length + 1).fill(0);
+    for (let i = 0; i < state.items.length; i++) {
+      lineOffset[i + 1] = lineOffset[i] + lineHeight[i];
+    }
+    const totalLines = lineOffset[state.items.length];
+
+    // Scroll: keep the first screen line of the cursor item vertically centered.
+    const cursorLine = lineOffset[cursorItemIdx];
+    const scrollStart = Math.max(
+      0,
+      Math.min(
+        cursorLine - Math.floor(bodyRows / 2),
+        Math.max(0, totalLines - bodyRows),
+      ),
+    );
+
+    // Find the first item whose lines overlap the scroll window.
+    // scrollStart is a screen-line offset; find first item where lineOffset[i+1] > scrollStart.
+    let firstItem = 0;
+    while (firstItem < state.items.length && lineOffset[firstItem + 1] <= scrollStart) {
+      firstItem++;
+    }
+
+    // Walk items from firstItem, emitting rendered lines until bodyRows is filled.
+    let screenLinesFilled = 0;
+    for (let i = firstItem; i < state.items.length && screenLinesFilled < bodyRows; i++) {
+      const item = state.items[i];
+      const isCursorItem = item.selectable && selectableIndices[state.cursor] === i;
+
+      let itemLines: string[];
 
       // In rename mode: replace the cursor row with the inline input field
       if (isCursorItem && state.mode.type === "rename") {
@@ -1056,10 +1093,16 @@ function buildFrame(): string[] {
         const line   = `${A.bgSelected}${indent}${A.bold}rename:${A.reset}${A.bgSelected} ${input}${A.fgPurple}█${A.reset}`;
         const visLen = stripAnsi(line).length;
         const pad    = Math.max(0, cols - visLen);
-        lines.push(line + " ".repeat(pad) + A.reset);
+        itemLines = [line + " ".repeat(pad) + A.reset];
       } else {
-        const { convIndex, convTotal } = convMeta[globalIdx];
-        lines.push(renderItem(item, isCursorItem, cols, convIndex, convTotal));
+        const { convIndex, convTotal } = convMeta[i];
+        itemLines = renderItem(item, isCursorItem, cols, convIndex, convTotal);
+      }
+
+      for (const l of itemLines) {
+        if (screenLinesFilled >= bodyRows) break;
+        lines.push(l);
+        screenLinesFilled++;
       }
     }
     // Pad body to bodyRows so footer stays pinned

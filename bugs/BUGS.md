@@ -1,4 +1,4 @@
-<!-- LOC cap: 317 (source: 3171, ratio: 0.10, updated: 2026-03-12) -->
+<!-- LOC cap: 718 (source: 7178, ratio: 0.10, updated: 2026-03-12) -->
 # Bugs
 
 ## Open
@@ -6,6 +6,7 @@
 ### BUG-024: Cross-session conversation switching does not work in orchestrator nav pane
 
 **Status**: mitigated — see [BUG-024.md](BUG-024.md) and ADR-016  
+**Roadmap**: tracked as open research in ADR-016 (no T-NNN — not a discrete implementation task)  
 **Branch**: `feature/orchestrator`  
 **Repro**: run `aid --mode orchestrator` with two sessions; select a conversation belonging to the other session and press Enter — terminal does not jump to the foreign session.  
 **Notes**: root cause 1 fixed (b1ee4ee: `"not a tty"` stored as `AID_CALLER_CLIENT`). Root cause 2 (`display-message #{client_tty}` returns empty for respawned pane with no attached client) may still block after fix. Next test will confirm whether `list-clients` fallback resolves the correct tty. See [BUG-024.md](BUG-024.md).
@@ -37,7 +38,7 @@
 
 **Status**: watching — needs reproduction
 **Repro**: open lazygit (`<leader>gg`), stage files, press `c` to commit; check `:messages` after closing lazygit — E5560 present intermittently.
-**Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [watching/BUG-015.md](watching/BUG-015.md).
+**Notes**: full stack trace never captured; error did not reproduce in follow-up session. All `writefile` call sites audited — none are obviously in a fast-event context. Leading suspect: `watch_buf()` fs_event watcher firing during `.git/` writes, but `vim.schedule_wrap` is used throughout so the chain should be safe. Next step: capture `:messages` stack trace on next occurrence. See [watching/BUG-015.md](watching/BUG-015.md). **Roadmap**: [T-024](../features/open/ROADMAP.md).
 
 ## Closed
 
@@ -112,6 +113,20 @@
 **Root cause**: `_cs_apply_style` sets window-local options via `vim.wo[win]` (`number=false`, `signcolumn=no`, etc.). `setlocal x<` (inherit from global) fell back to Neovim's built-in default (`number=false`), not to our `vim.opt.number = true`, because the OPTIONS block was at the bottom of init.lua after `lazy.setup()` — so `vim.o.number` was still `false` when autocmds fired.
 **Fix**: Moved OPTIONS block to the top of init.lua (right after netrw disabling), before all plugin/autocmd code. Replaced `setlocal x<` with explicit `setlocal number signcolumn=yes ...` in the restore autocmds.
 
+### BUG-AID-SESSIONS-5: Stale session list on launch (opencode HTTP port not ready)
+
+**Status**: closed — fixed (commits `14dac07`, `18e9c41`)
+**Repro**: on launch, `aid-sessions` shows each live session with `(no conversations yet)` instead of real conversation titles; correct list appears ~2–7 s later.
+**Root cause**: `aid-sessions-list` queries each session's opencode HTTP API (`GET /session` on `AID_ORC_PORT`) at startup, but opencode hasn't bound its port yet — curl times out and `_opencode_conversations()` returns nothing.
+**Fix**: (1) run `eval "$_lst"` before opening fzf and pipe to stdin so fzf opens with real data on frame 1 (eliminates blank-flash); (2) restructure ticker loop to fire `tick=0` immediately after the 2-second fzf warmup sleep, reducing stale-list window from 7 s to ~2 s. Residual: first ~2 s may still show `(no conversations yet)` — acceptable minimum warmup for the fzf `--listen` port.
+
+### BUG-AID-SESSIONS-2: Zombie ticker processes accumulate after each action
+
+**Status**: closed — fixed (commit `f3c7063`)
+**Repro**: after each rename/delete/enter action, a new background `curl` ticker process spawns and the old one is never killed; after 4 actions, 4 independent ticker loops hammer dead ports every 5 s.
+**Root cause**: actions used `exec "$AID_DIR/lib/sessions/aid-sessions"` as a tail-call; `exec` replaces the shell process without triggering the `EXIT` trap, so `$_ticker_pid` was never killed.
+**Fix**: replace all `exec` tail-calls with a `while true` main loop. Ticker spawned once; port is constant for the lifetime of the process; `EXIT` trap fires correctly on true exit.
+
 ### BUG-003: opencode launch command visible in pane before startup completes
 
 **Status**: closed
@@ -120,3 +135,5 @@
 **Fix**: pass the command directly to `split-window` as an argument so the pane spawns straight into the process with no intermediate prompt or visible keystrokes.
 
 *(BUG-005, BUG-001, BUG-002 moved to [archive/BUGS-2026-03-09.md](archive/BUGS-2026-03-09.md))*
+
+*(BUG-AID-SESSIONS-1, BUG-AID-SESSIONS-3: confirmed expected fzf behaviour — duplicate POS events on held arrow keys, no POS event at list boundaries — deliberately not fixed; see `main/docs/` history)*

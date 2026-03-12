@@ -1,4 +1,4 @@
-<!-- LOC cap: 317 (source: 3171, ratio: 0.10, updated: 2026-03-12) -->
+<!-- LOC cap: 718 (source: 7178, ratio: 0.10, updated: 2026-03-12) -->
 # Decisions
 
 Architecture decision records — why things are the way they are.
@@ -64,7 +64,7 @@ the session, rather than reusing the existing terminal.
    entirely. Potential issue: if the user has multiple terminals, the heuristic may pick
    the wrong one.
 
-**Consequence for current code**: `BUG-024` is closed as mitigated. This ADR tracks the
+**Consequence for current code**: `BUG-024` is open as mitigated. This ADR tracks the
 open research question. Once a direction is validated, it should become a **Made** ADR
 and the Hyprland-specific fallback in `aid-sessions.ts` should become an optional
 enhancement layer rather than the primary path.

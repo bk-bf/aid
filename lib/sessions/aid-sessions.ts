@@ -28,7 +28,10 @@ const AID_DATA = process.env.AID_DATA ?? "";
 const AID_DEBUG_LOG = process.env.AID_DEBUG_LOG ?? "";
 const TMUX_PANE = process.env.TMUX_PANE ?? "";
 const AID_ORC_NAME = process.env.AID_ORC_NAME ?? "";   // short session name (e.g. "aid")
-let AID_CALLER_CLIENT = process.env.AID_CALLER_CLIENT ?? "";
+// Filter out "not a tty" which is what the `tty` command prints when stdin
+// is not connected to a terminal (e.g. respawn-pane).
+const _rawCallerClient = process.env.AID_CALLER_CLIENT ?? "";
+let AID_CALLER_CLIENT = _rawCallerClient.includes("not a tty") ? "" : _rawCallerClient;
 
 if (!AID_DIR || !AID_DATA) {
   process.stderr.write("aid-sessions: AID_DIR and AID_DATA must be set\n");
@@ -1506,19 +1509,28 @@ async function boot(): Promise<void> {
   // Resolve caller client tty + self-heal session tag — run in parallel
   const initTasks: Promise<unknown>[] = [];
 
-  if (!AID_CALLER_CLIENT && TMUX_PANE) {
-    initTasks.push(
-      tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{client_tty}")
-        .catch(() => "")
-        .then((tty) => { if (tty) AID_CALLER_CLIENT = tty; }),
-    );
-  }
+  // Try to resolve the caller client tty.  The two sources are tried in
+  // priority order:
+  //   1. tmux display-message #{client_tty} for this pane
+  //   2. the `tty` command (only valid when stdin IS a tty; outputs
+  //      "not a tty" otherwise — that must be filtered out)
+  // We run them sequentially so that the `tty` fallback only fires when
+  // the tmux query returns empty (avoids storing "not a tty" in the var).
   if (!AID_CALLER_CLIENT) {
     initTasks.push(
       (async () => {
+        // 1. tmux query (works even when stdin is not a tty).
+        if (TMUX_PANE) {
+          const tty = await tmuxOutput("display-message", "-t", TMUX_PANE, "-p", "#{client_tty}").catch(() => "");
+          if (tty) { AID_CALLER_CLIENT = tty; return; }
+        }
+        // 2. `tty` binary fallback — only useful when stdin IS a real tty.
         try {
           const ttyProc = Bun.spawn(["tty"], { stdout: "pipe", stderr: "ignore" });
-          AID_CALLER_CLIENT = (await new Response(ttyProc.stdout).text()).trim();
+          const raw = (await new Response(ttyProc.stdout).text()).trim();
+          if (raw && raw !== "not a tty" && !raw.includes("not a tty")) {
+            AID_CALLER_CLIENT = raw;
+          }
         } catch { /* ignore */ }
       })(),
     );

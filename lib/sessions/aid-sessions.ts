@@ -19,6 +19,7 @@
 
 import { appendFileSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { Database } from "bun:sqlite";
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 
@@ -137,24 +138,65 @@ async function orcPort(session: string): Promise<number> {
   return computePort(session);
 }
 
+/** Read conversations from the opencode SQLite DB (works even when opencode is offline). */
+function convosFromDb(repoPath: string): OrcConversation[] {
+  const dbPath = join(AID_DATA, "opencode/opencode.db");
+  try {
+    const db = new Database(dbPath, { readonly: true, create: false });
+    try {
+      let rows: Array<{ id: string; title: string; directory: string; time_updated: number }>;
+      if (repoPath) {
+        rows = db
+          .query<{ id: string; title: string; directory: string; time_updated: number }, [string]>(
+            "SELECT id, title, directory, time_updated FROM session WHERE time_archived IS NULL AND directory = ? ORDER BY time_updated DESC",
+          )
+          .all(repoPath);
+      } else {
+        rows = db
+          .query<{ id: string; title: string; directory: string; time_updated: number }, []>(
+            "SELECT id, title, directory, time_updated FROM session WHERE time_archived IS NULL ORDER BY time_updated DESC",
+          )
+          .all();
+      }
+      return rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        directory: r.directory,
+        time: { updated: r.time_updated },
+      }));
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    dbg("SQLITE", `failed to read DB: ${e}`);
+    return [];
+  }
+}
+
 async function orcConversations(
   port: number,
   repoPath: string,
 ): Promise<OrcConversation[]> {
-  if (!port) return [];
-  try {
-    const resp = await fetch(`http://127.0.0.1:${port}/session`, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!resp.ok) return [];
-    const all = (await resp.json()) as OrcConversation[];
-    return all
-      .filter((c) => !repoPath || c.directory === repoPath)
-      .sort((a, b) => b.time.updated - a.time.updated);
-  } catch {
-    return [];
+  // Try HTTP first — it's the live source and includes real-time active state.
+  if (port) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/session`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (resp.ok) {
+        const all = (await resp.json()) as OrcConversation[];
+        const filtered = all
+          .filter((c) => !repoPath || c.directory === repoPath)
+          .sort((a, b) => b.time.updated - a.time.updated);
+        if (filtered.length > 0) return filtered;
+      }
+    } catch {
+      // fall through to SQLite
+    }
   }
+  // Fallback: read directly from the SQLite DB.
+  return convosFromDb(repoPath);
 }
 
 async function orcActiveConv(session: string): Promise<string> {

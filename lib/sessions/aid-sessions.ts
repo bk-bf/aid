@@ -409,18 +409,11 @@ const state: AppState = {
 
 let statusClearTimer: ReturnType<typeof setTimeout> | null = null;
 
-// Previous frame lines (without ANSI) used for diffing.
-// Stored as rendered strings (with ANSI) so we can reuse them directly.
-let prevFrame: string[] = [];
-// Set to true when we need a full repaint (e.g. after resize or first render).
-let forceFullRepaint = true;
-
 function safeWrite(s: string): void {
   try {
     process.stdout.write(s);
   } catch {
-    // EIO / broken pipe — terminal is gone, exit cleanly (cleanup's stdout
-    // writes will also be swallowed since they're now guarded)
+    // EIO / broken pipe — terminal is gone, exit cleanly
     cleanup();
     process.exit(0);
   }
@@ -470,7 +463,7 @@ function buildFrame(): string[] {
   // Blank separator
   lines.push("");
 
-  // Status line (rows - 2, 0-based)
+  // Status line
   if (state.statusMsg) {
     lines.push(`  ${A.fgYellow}${state.statusMsg}${A.reset}`);
   } else {
@@ -484,30 +477,18 @@ function buildFrame(): string[] {
 }
 
 function render(): void {
-  const newFrame = buildFrame();
-  const buf: string[] = [A.hideCursor];
+  const frame = buildFrame();
+  const buf: string[] = [];
 
-  if (forceFullRepaint) {
-    // Full clear + rewrite — only on first render or after resize
-    buf.push(A.clearScreen);
-    for (let i = 0; i < newFrame.length; i++) {
-      buf.push(newFrame[i] + "\n");
-    }
-    forceFullRepaint = false;
-  } else {
-    // Diff: only rewrite lines that changed
-    const len = Math.max(newFrame.length, prevFrame.length);
-    for (let i = 0; i < len; i++) {
-      const next = newFrame[i] ?? "";
-      const prev = prevFrame[i] ?? "";
-      if (next !== prev) {
-        // Move to row i+1 (1-based), erase line, write new content
-        buf.push(A.moveTo(i + 1) + next);
-      }
-    }
+  // Hide cursor, clear screen, then write every line using absolute positioning.
+  // Never use \n — that would advance the scrollback buffer and cause lines to
+  // pile up below the visible area on refresh.
+  buf.push(A.hideCursor);
+  buf.push(A.clearScreen);
+  for (let i = 0; i < frame.length; i++) {
+    buf.push(A.moveTo(i + 1) + frame[i]);
   }
 
-  prevFrame = newFrame;
   safeWrite(buf.join(""));
 }
 
@@ -868,7 +849,7 @@ process.on("SIGHUP", () => { /* ignore */ });
 // Safety net: always restore terminal on any unhandled error before dying
 process.on("uncaughtException", (e) => { dbg("ERR", `uncaught: ${e}`); try { cleanup(); } catch { /* ignore */ } process.exit(1); });
 process.on("unhandledRejection", (e) => { dbg("ERR", `unhandledRejection: ${e}`); try { cleanup(); } catch { /* ignore */ } process.exit(1); });
-process.stdout.on("resize", () => { forceFullRepaint = true; prevFrame = []; render(); });
+process.stdout.on("resize", () => { render(); });
 
 // ── Background dead-session prune ─────────────────────────────────────────────
 

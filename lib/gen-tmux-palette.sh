@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 # AID_DIR — source root (where nvim/lua/palette.lua lives).
 # AID_DATA — runtime artifact root (where palette.conf is written).
-AID_DIR="${AID_DIR:-$SCRIPT_DIR}"
+AID_DIR="${AID_DIR:-$(dirname "$SCRIPT_DIR")}"
 AID_DATA="${AID_DATA:-$HOME/.local/share/aid}"
 OUT="$AID_DATA/tmux/palette.conf"
 PALETTE="$AID_DIR/nvim/lua/palette.lua"

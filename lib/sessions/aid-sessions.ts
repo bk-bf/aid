@@ -957,7 +957,7 @@ function renderItem(
         const titleRight = `${A.fgGray}${A.dim}${age}`;
         const line1 = padLine(rightAlign(titleLine, titleRight, cols));
 
-        if (status !== "idle") {
+        // Status second line — always rendered.
           // Continuation below subagent row:
           // if parentHasMoreRoots → keep │ under contChar; if isLastSubagent → space, else │
           const subContChar = parentHasMoreRoots
@@ -967,14 +967,12 @@ function renderItem(
             ? ` `
             : `${A.fgLavender}│${rfg}`;
           const statusLabel =
-            status === "busy" ? `${A.fgAmber}• Working${rfg}` :
-            /* retry */         `${A.fgRed}↺ Retry${rfg}`;
+            status === "busy"  ? `${A.fgAmber}• Working${rfg}` :
+            status === "retry" ? `${A.fgRed}↺ Retry${rfg}`    :
+            /* idle */           `${A.fgGray}${A.dim}· idle${rfg}`;
           // Align under arrow+marker: selBar(1) + sp(1) + contChar(1) + "  "(2) + contChar2(1) + "  "(2) = 8 chars
           const line2 = padLine(`${selBg}${selBar} ${subContChar}    ${subContChar2}   ${A.dim}${statusLabel}${rfg}`);
           return [line1, line2];
-        }
-
-        return [line1];
       }
 
       // ── root conversation row ──────────────────────────────────────────────
@@ -996,24 +994,23 @@ function renderItem(
       const titleRight = `${A.fgGray}${A.dim}${age}`;
       const line1 = padLine(rightAlign(titleLine, titleRight, cols));
 
-      // Status second line — only rendered when not idle.
+      // Status second line — always rendered to keep consistent spacing.
       // Visual structure:
       //   <selBar> <contChar>   <statusLabel>
       // contChar: │ when not last (tree continues), space when last.
       // Indented to align under the title text (selBar=1, sp=1, tree=2, sp=1 → 5 chars).
-      if (status !== "idle") {
+      {
         const contChar = isLast
-          ? `${A.fgLavender} ${rfg}`         // last conv — no continuation bar
-          : `${A.fgLavender}│${rfg}`;         // more convs below — vertical bar
+          ? ` `                                 // last conv — no continuation bar
+          : `${A.fgLavender}│${rfg}`;           // more convs below — vertical bar
         const statusLabel =
           status === "busy"  ? `${A.fgAmber}• Working${rfg}` :
-          /* retry */          `${A.fgRed}↺ Retry${rfg}`;
+          status === "retry" ? `${A.fgRed}↺ Retry${rfg}`    :
+          /* idle */           `${A.fgGray}${A.dim}· idle${rfg}`;
         // 5-char indent mirrors: selBar(1) + sp(1) + treeChar(2) + sp(1)
         const line2 = padLine(`${selBg}${selBar} ${contChar}    ${A.dim}${statusLabel}${rfg}`);
         return [line1, line2];
       }
-
-      return [line1];
     }
 
     // ── separator between session groups ─────────────────────────────────────
@@ -1193,7 +1190,7 @@ function buildFrame(): string[] {
     // Compute screen-line height per item.
     // Conv items with a non-idle status take 2 lines; everything else takes 1.
     const lineHeight = state.items.map((item) =>
-      item.kind.type === "conv" && item.kind.status !== "idle" ? 2 : 1,
+      item.kind.type === "conv" ? 2 : 1,
     );
 
     // lineOffset[i] = total screen lines before item i (0-based).

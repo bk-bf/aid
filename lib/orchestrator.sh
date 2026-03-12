@@ -314,22 +314,6 @@ if [[ "${1:-}" == "--resurrect" ]]; then
   exit 0
 fi
 
-# Normal launch: find existing orchestrator sessions (tagged @aid_mode=orchestrator).
-# This explicitly excludes plain aid sessions sharing the same tmux server.
-# Use awk field match (not grep) — @aid_mode is last field, no trailing space.
-_existing=$(tmux -L aid list-sessions \
-  -F "#{session_last_attached} #{@aid_mode} #{session_name}" 2>/dev/null \
-  | awk '$2 == "orchestrator" {print $1, $3}' \
-  | sort -rn \
-  | awk '{print $NF}' \
-  || true)
-
-if [[ -z "$_existing" ]]; then
-  # No orchestrator sessions yet — auto-create one from cwd.
-  _new_session_from_cwd
-else
-  # Auto-attach to most recently used orchestrator session.
-  _target=$(printf '%s\n' "$_existing" | head -1)
-  dbg "auto-attaching to $_target"
-  _attach_or_switch "$_target"
-fi
+# Normal launch: always create a new orchestrator session from cwd.
+# (To attach to an existing session, use `aid -a`.)
+_new_session_from_cwd

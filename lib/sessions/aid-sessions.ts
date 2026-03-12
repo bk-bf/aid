@@ -103,7 +103,65 @@ function metaFor(session: string): SessionMeta | undefined {
   return readMeta().find((m) => m.tmux_session === session);
 }
 
-// ── opencode HTTP API ─────────────────────────────────────────────────────────
+// ── Session ownership map ─────────────────────────────────────────────────────
+//
+// Maps opencode conv ID → aid tmux session name.
+// Written to $AID_DATA/opencode/session-owners.json and updated whenever we
+// fetch a live port's session list (which is the authoritative source for
+// which convs belong to which aid session).
+// Used to filter SQLite results for offline sessions.
+
+const OWNERS_PATH = join(AID_DATA, "opencode/session-owners.json");
+
+function readOwners(): Record<string, string> {
+  try { return JSON.parse(readFileSync(OWNERS_PATH, "utf-8")); } catch { return {}; }
+}
+
+function writeOwners(owners: Record<string, string>): void {
+  try { writeFileSync(OWNERS_PATH, JSON.stringify(owners, null, 2)); } catch { /* best-effort */ }
+}
+
+/** Tag all conv IDs returned by a live port as belonging to `tmuxSession`. Persists to disk. */
+function tagConvOwners(convIds: string[], tmuxSession: string): void {
+  const owners = readOwners();
+  let changed = false;
+  for (const id of convIds) {
+    if (owners[id] !== tmuxSession) { owners[id] = tmuxSession; changed = true; }
+  }
+  if (changed) writeOwners(owners);
+}
+
+/** Return conv IDs owned by `tmuxSession` according to the persisted owner map. */
+function ownedConvIds(tmuxSession: string): Set<string> {
+  const owners = readOwners();
+  return new Set(Object.entries(owners).filter(([, s]) => s === tmuxSession).map(([id]) => id));
+}
+
+/** Read convs from SQLite filtered to those owned by `tmuxSession`. */
+function convosFromDbForSession(tmuxSession: string): OrcConversation[] {
+  const ids = ownedConvIds(tmuxSession);
+  if (ids.size === 0) return [];
+  const dbPath = join(AID_DATA, "opencode/opencode.db");
+  try {
+    const db = new Database(dbPath, { readonly: true, create: false });
+    try {
+      // SQLite doesn't support array binding — build placeholders dynamically.
+      const placeholders = Array.from(ids).map(() => "?").join(",");
+      const rows = db
+        .query<{ id: string; title: string; directory: string; time_updated: number }, string[]>(
+          `SELECT id, title, directory, time_updated FROM session WHERE time_archived IS NULL AND id IN (${placeholders}) ORDER BY time_updated DESC`,
+        )
+        .all(...Array.from(ids));
+      return rows.map((r) => ({ id: r.id, title: r.title, directory: r.directory, time: { updated: r.time_updated } }));
+    } finally {
+      db.close();
+    }
+  } catch (e) {
+    dbg("SQLITE", `convosFromDbForSession failed: ${e}`);
+    return [];
+  }
+}
+
 
 interface OrcConversation {
   id: string;
@@ -138,19 +196,24 @@ async function orcPort(session: string): Promise<number> {
   return computePort(session);
 }
 
-async function orcConversations(port: number): Promise<OrcConversation[]> {
-  if (!port) return [];
-  try {
-    const resp = await fetch(`http://127.0.0.1:${port}/session`, {
-      headers: { Accept: "application/json" },
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!resp.ok) return [];
-    const all = (await resp.json()) as OrcConversation[];
-    return all.sort((a, b) => b.time.updated - a.time.updated);
-  } catch {
-    return [];
+async function orcConversations(port: number, tmuxSession: string): Promise<OrcConversation[]> {
+  if (port) {
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/session`, {
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (resp.ok) {
+        const all = (await resp.json()) as OrcConversation[];
+        const sorted = all.sort((a, b) => b.time.updated - a.time.updated);
+        // Tag ownership while we have live data — this is how the map gets populated.
+        if (sorted.length > 0) tagConvOwners(sorted.map((c) => c.id), tmuxSession);
+        return sorted;
+      }
+    } catch { /* fall through to DB */ }
   }
+  // Port offline — use the persisted owner map to filter the shared SQLite DB.
+  return convosFromDbForSession(tmuxSession);
 }
 
 async function orcActiveConv(session: string): Promise<string> {
@@ -429,7 +492,7 @@ async function buildList(): Promise<ListItem[]> {
         orcPort(session),
         orcActiveConv(session),
       ]);
-      const convs = await orcConversations(port);
+      const convs = await orcConversations(port, session);
       return { session, port, convs, activeConvId };
     }),
   );
@@ -1070,6 +1133,7 @@ async function newConversation(): Promise<void> {
   if (!newId) { setStatus("failed to create conversation"); render(); return; }
 
   dbg("ACTN", `new conv created id=${newId}`);
+  tagConvOwners([newId], targetSession);
   await orcSelectConversation(port, newId);
   await refresh();
 }

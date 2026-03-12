@@ -474,6 +474,12 @@ async function buildList(): Promise<ListItem[]> {
     .filter(Boolean)
     .sort();
 
+  // Always pin the current session to the top.
+  if (currentSession && liveSessions.includes(currentSession)) {
+    liveSessions.splice(liveSessions.indexOf(currentSession), 1);
+    liveSessions.unshift(currentSession);
+  }
+
   const meta = readMeta();
   const liveSet = new Set(liveSessions);
   const deadSessions = meta.map((m) => m.tmux_session).filter((s) => !liveSet.has(s));

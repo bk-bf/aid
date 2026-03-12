@@ -187,8 +187,7 @@ aid — AI-assisted dev environment
 
 Usage:
   aid                        launch new session in current directory
-  aid --no-ai                launch without the opencode pane (editor + sidebar only)
-  aid --mode orchestrator    launch orchestrator mode (T3/Codex-style multi-session layout)
+  aid --no-ai                launch without opencode; orc window is also skipped
   aid -a, --attach           interactive session list to attach to
   aid -a <name>              attach directly to named session
   aid -i, --install          (re)run install.sh — install/update plugins and symlinks
@@ -200,6 +199,11 @@ Usage:
                                Useful for testing feature branches before they land in main.
   aid -d, --debug            verbose output (set -x + step tracing)
   aid -h, --help             show this help
+
+Layout:
+  Each session has two windows toggled with prefix+1 / prefix+2:
+    1 (ide) — sidebar + nvim + opencode
+    2 (orc) — navigator + opencode (with HTTP API) + diff
 EOF
     exit
     ;;
@@ -245,22 +249,6 @@ EOF
     exit 1
     ;;
 esac
-
-# ── Mode dispatch ─────────────────────────────────────────────────────────────
-# --mode flags are consumed by the pre-pass and dispatched here, after branch
-# re-exec, so that --branch --mode orchestrator works correctly.
-if [[ -n "$AID_MODE" ]]; then
-  case "$AID_MODE" in
-    orchestrator)
-      export AID_DIR AID_DATA AID_CONFIG AID_DEBUG
-      exec "$AID_DIR/lib/orchestrator.sh"
-      ;;
-    *)
-      echo "aid: unknown mode '$AID_MODE'  (known: orchestrator)" >&2
-      exit 1
-      ;;
-  esac
-fi
 
 # No flag — fall through to create a new session in current directory.
 
@@ -426,6 +414,65 @@ tmux -L aid run-shell -t "$editor_pane_id" "$AID_DIR/lib/ensure_treemux.sh"
 dbg "respawning editor pane into nvim loop"
 tmux -L aid respawn-pane -k -t "$editor_pane_id" \
   "cd $(printf '%q' "$launch_dir") && while true; do rm -f $(printf '%q' "$nvim_socket"); XDG_CONFIG_HOME=$(printf '%q' "$AID_DIR") XDG_DATA_HOME=$(printf '%q' "$AID_DATA") XDG_STATE_HOME=$(printf '%q' "$XDG_STATE_HOME") XDG_CACHE_HOME=$(printf '%q' "$XDG_CACHE_HOME") LG_CONFIG_FILE=$(printf '%q' "$AID_CONFIG/lazygit/config.yml") NVIM_APPNAME=nvim nvim --listen $(printf '%q' "$nvim_socket"); done"
+
+# ── Window 1: orchestrator layout (nav | opencode | diff) ────────────────────
+# Skipped when --no-ai is set — the orc window requires opencode to be useful.
+if [[ "$AID_NO_AI" -eq 0 ]]; then
+  dbg "creating orchestrator window"
+  tmux -L aid new-window -t "$session" -n "orc" -c "$launch_dir"
+
+  # Deterministic HTTP port for this session's opencode server.
+  orc_port=$(( 4200 + $(printf '%s' "$session" | cksum | cut -d' ' -f1) % 1000 ))
+  tmux -L aid set-environment -t "$session" AID_ORC_PORT "$orc_port"
+  tmux -L aid set-environment -t "$session" AID_ORC_REPO "$launch_dir"
+
+  local_nav_pane=$(tmux -L aid list-panes -t "${session}:orc" -F "#{pane_id}" | head -1)
+
+  # Split right: opencode gets ~80%, nav keeps ~20%.
+  local_orc_pane=$(tmux -L aid split-window -h -t "$local_nav_pane" -P -F "#{pane_id}" \
+    -l "80%" -- sleep infinity)
+  # Split right: diff gets ~25% of remaining.
+  local_diff_pane=$(tmux -L aid split-window -h -t "$local_orc_pane" -P -F "#{pane_id}" \
+    -l "25%" -- sleep infinity)
+
+  dbg "orc window: nav=$local_nav_pane orc=$local_orc_pane diff=$local_diff_pane port=$orc_port"
+
+  # Store pane IDs for aid-sessions.
+  tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE  "$local_nav_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_ORC_PANE  "$local_orc_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_DIFF_PANE "$local_diff_pane"
+
+  # Respawn opencode with HTTP port.
+  tmux -L aid respawn-pane -k -t "$local_orc_pane" \
+    "OPENCODE_CONFIG_DIR=$(printf '%q' "$OPENCODE_CONFIG_DIR") OPENCODE_TUI_CONFIG=$(printf '%q' "$OPENCODE_TUI_CONFIG") XDG_DATA_HOME=$(printf '%q' "$AID_DATA") opencode --port ${orc_port} $(printf '%q' "$launch_dir")"
+
+  # Respawn the navigator.
+  local_nav_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_DATA=$(printf '%q' "$AID_DATA") AID_CONFIG=$(printf '%q' "${AID_CONFIG:-}")"
+  tmux -L aid respawn-pane -k -t "$local_nav_pane" \
+    "${local_nav_env} bun run $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions.ts")"
+
+  # Respawn the diff pane.
+  local_diff_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_ORC_REPO=$(printf '%q' "$launch_dir")"
+  tmux -L aid respawn-pane -k -t "$local_diff_pane" \
+    "${local_diff_env} bun run $(printf '%q' "$AID_DIR/lib/sessions/aid-diff.ts")"
+
+  # Build the ORCH status bar strings from the live global palette.
+  orch_status_l=$(tmux -L aid show-option -gqv status-left | sed 's/ #S / ORCH /g')
+  orch_status_r=$(tmux -L aid show-option -gqv status-right)
+
+  # ── Status bar hook: vimbridge on ide window, ORCH pill on orc window ──────
+  vimbridge_l="#(cat \#{socket_path}-\#{session_id}-vimbridge)"
+  vimbridge_r="#(cat \#{socket_path}-\#{session_id}-vimbridge-R)"
+  tmux -L aid set-hook -t "$session" after-select-window \
+    "if-shell '[ \"#{window_name}\" = orc ]' \
+       'set-option -t $(printf '%q' "$session") status-left $(printf '%q' "$orch_status_l") ; set-option -t $(printf '%q' "$session") status-right $(printf '%q' "$orch_status_r")' \
+       'set-option -t $(printf '%q' "$session") status-left $(printf '%q' "$vimbridge_l") ; set-option -t $(printf '%q' "$session") status-right $(printf '%q' "$vimbridge_r")'"
+else
+  dbg "--no-ai set: skipping orchestrator window"
+fi
+
+# Return to window 0 (IDE layout) for initial attach.
+tmux -L aid select-window -t "${session}:0"
 
 dbg "attaching to session=$session"
 attach_or_switch "$session"

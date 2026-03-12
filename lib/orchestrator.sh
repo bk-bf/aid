@@ -4,7 +4,7 @@
 # Starts the T3/Codex-style multi-session layout on the aid tmux server.
 #
 # Layout per aid@<name> session (widths approximate):
-#   [navigator ~25%] | [opencode ~75%]
+#   [navigator ~20%] | [opencode ~55%] | [diff ~25%]
 #   [tab: nvim — full width]
 #
 # The navigator (left pane) runs aid-sessions (fzf-based) which shows all
@@ -104,9 +104,10 @@ _most_recent_session() {
 # ── Layout spawner ────────────────────────────────────────────────────────────
 
 # spawn_orc_session <name> <repo_path>
-# Creates a new aid@<name> tmux session with the 2-pane orchestrator layout:
-#   left  (~25%)  aid-sessions navigator (fzf, persistent)
-#   right (~75%)  opencode
+# Creates a new aid@<name> tmux session with the 3-pane orchestrator layout:
+#   left  (~20%)  aid-sessions navigator (fzf, persistent)
+#   center (~55%) opencode
+#   right  (~25%) aid-diff (git diff review pane)
 # Plus a second window "nvim" (full-width nvim + treemux sidebar).
 spawn_orc_session() {
   local name="$1" repo_path="$2"
@@ -150,12 +151,12 @@ spawn_orc_session() {
   tmux -L aid set-environment -t "$session" AID_ORC_PORT      "$orc_port"
 
   # ── Build the layout ──
-  # Normal mode (2 panes, side by side):
-  #   nav (left ~25%) | opencode (right ~75%)
+  # Normal mode (3 panes, side by side):
+  #   nav (left ~20%) | opencode (center ~55%) | diff (right ~25%)
   #
-  # Debug mode (3 panes):
-  #   nav (left ~25%) | opencode (right ~75%)
-  #   ──────────────── debug log (~25% height, full width) ────────────────
+  # Debug mode (4 panes):
+  #   nav (left ~20%) | opencode (center ~55%) | diff (right ~25%)
+  #   ─────────────── debug log (~25% height, full width) ───────────────
   #
   # Initial pane → will become the navigator (left).
   local nav_pane
@@ -163,7 +164,7 @@ spawn_orc_session() {
 
   # In debug mode: first split the window horizontally (top/bottom) so the
   # debug pane spans the full width at the bottom.  Then split the top half
-  # vertically into nav | opencode.
+  # vertically into nav | opencode | diff.
   local dbg_pane="" debug_log=""
   if [[ "${AID_DEBUG:-0}" -eq 1 ]]; then
     debug_log="${repo_path}/log-$(date '+%Y%m%d-%H%M%S').txt"
@@ -177,16 +178,23 @@ spawn_orc_session() {
   fi
 
   # Split the top pane (nav_pane) vertically: right side becomes opencode.
+  # opencode gets ~80% of remaining width (nav keeps ~20%).
   local orc_pane
   orc_pane=$(tmux -L aid split-window -h -t "$nav_pane" -P -F "#{pane_id}" \
-    -l "75%" -- sleep infinity)
+    -l "80%" -- sleep infinity)
 
-  dbg "nav=$nav_pane orc=$orc_pane"
-  _spawn_log "$debug_log" "panes ready: nav=${nav_pane} orc=${orc_pane}${dbg_pane:+ dbg=${dbg_pane}}"
+  # Split the right side of opencode: rightmost ~25% becomes the diff pane.
+  local diff_pane
+  diff_pane=$(tmux -L aid split-window -h -t "$orc_pane" -P -F "#{pane_id}" \
+    -l "25%" -- sleep infinity)
+
+  dbg "nav=$nav_pane orc=$orc_pane diff=$diff_pane"
+  _spawn_log "$debug_log" "panes ready: nav=${nav_pane} orc=${orc_pane} diff=${diff_pane}${dbg_pane:+ dbg=${dbg_pane}}"
 
   # Store pane IDs in session env so aid-sessions can find the opencode pane.
-  tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE "$nav_pane"
-  tmux -L aid set-environment -t "$session" AID_ORC_ORC_PANE "$orc_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_NAV_PANE  "$nav_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_ORC_PANE  "$orc_pane"
+  tmux -L aid set-environment -t "$session" AID_ORC_DIFF_PANE "$diff_pane"
 
   # Start opencode in the right pane with a fixed HTTP port so the navigator
   # can reach the /tui/select-session API without port discovery.
@@ -209,6 +217,15 @@ spawn_orc_session() {
   tmux -L aid respawn-pane -k -t "$nav_pane" \
     "${nav_env} bun run $(printf '%q' "$AID_DIR/lib/sessions/aid-sessions.ts")"
   _spawn_log "$debug_log" "nav_pane=${nav_pane} respawned (aid-sessions.ts)"
+
+  # Start aid-diff in the right pane (TypeScript/Bun diff review pane).
+  local diff_env
+  diff_env="AID_DIR=$(printf '%q' "$AID_DIR") AID_ORC_REPO=$(printf '%q' "$repo_path")"
+  [[ -n "$debug_log" ]] && diff_env+=" AID_DEBUG_LOG=$(printf '%q' "$debug_log")"
+  _spawn_log "$debug_log" "respawn diff_pane=${diff_pane}: aid-diff.ts"
+  tmux -L aid respawn-pane -k -t "$diff_pane" \
+    "${diff_env} bun run $(printf '%q' "$AID_DIR/lib/sessions/aid-diff.ts")"
+  _spawn_log "$debug_log" "diff_pane=${diff_pane} respawned (aid-diff.ts)"
 
   # Start the debug log viewer if in debug mode.
   if [[ -n "$dbg_pane" && -n "$debug_log" ]]; then

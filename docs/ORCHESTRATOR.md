@@ -20,8 +20,9 @@ It replaces the standard aid layout (sidebar + nvim + opencode in one session) w
 ```
 
 Each `aid@<name>` tmux session contains:
-- **Left pane** (~25%): `aid-sessions.ts` — the TypeScript/Bun navigator
-- **Right pane** (~75%): `opencode` — the AI TUI
+- **Left pane** (~20%): `aid-sessions.ts` — the TypeScript/Bun navigator
+- **Centre pane** (~55%): `opencode` — the AI TUI
+- **Right pane** (~25%): `aid-diff.ts` — the live diff review pane
 - **Bottom pane** (full width, debug mode only): `aid-sessions-debug` — live log viewer
 
 ## Entry point
@@ -48,11 +49,14 @@ aid.sh --mode orchestrator
         └── _new_session_from_cwd / spawn_orc_session
               ├── tmux new-session -d -s aid@<name>
               ├── set-environment: AID_ORC_PORT, AID_ORC_NAME, AID_ORC_REPO,
-              │                    AID_NVIM_SOCKET, AID_ORC_NAV_PANE, AID_ORC_ORC_PANE
+              │                    AID_NVIM_SOCKET, AID_ORC_NAV_PANE,
+              │                    AID_ORC_ORC_PANE, AID_ORC_DIFF_PANE
               ├── [debug] split bottom 25% → dbg_pane (sleep infinity placeholder)
-              ├── split right 75% → orc_pane (sleep infinity placeholder)
+              ├── split right 80% → orc_pane (sleep infinity placeholder)
+              ├── split orc_pane right 25% → diff_pane (sleep infinity placeholder)
               ├── respawn orc_pane  → opencode --port <AID_ORC_PORT> <repo_path>
               ├── respawn nav_pane  → aid-sessions.ts
+              ├── respawn diff_pane → aid-diff.ts
               ├── [debug] respawn dbg_pane → aid-sessions-debug
               ├── set-option @aid_mode orchestrator  (for session discovery)
               ├── _meta_write <name> <repo_path>     (persist to sessions.json)
@@ -305,6 +309,102 @@ boot()
 The 5s interval is skipped while in `rename` or `delete-confirm` mode to avoid
 interrupting user input.
 
+## `aid-diff` — the diff pane
+
+`lib/sessions/aid-diff.ts` is a self-contained Bun/TypeScript process that owns
+the right pane (~25%). It renders a live `git diff` view, updated on every file
+change via `inotifywait`, and supports keyboard-driven scrolling and inline
+per-file expansion.
+
+### Layout position
+
+```
+┌─────────────────┬─────────────────────────────┬──────────────────┐
+│  aid-sessions   │                             │    aid-diff      │
+│   nav (~20%)    │       opencode TUI          │ git diff HEAD    │
+│                 │        orc (~55%)           │  diff (~25%)     │
+├─────────────────┴─────────────────────────────┴──────────────────┤
+│  debug log pane  (only with -d / AID_DEBUG=1)                    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Update model
+
+`inotifywait -m -r -e close_write,create,delete,move` watches the repo root.
+Events are debounced 150 ms before triggering a `git diff` run. On startup a
+full refresh runs immediately.
+
+When `delta` is on `$PATH` it is used for syntax-highlighted output; otherwise
+`git diff --color=always` is used directly.
+
+### Diff modes
+
+Cycled with `t`:
+
+| Mode | Command |
+|---|---|
+| **HEAD** (default) | `git diff HEAD` |
+| **staged** | `git diff --cached` |
+| **unstaged** | `git diff` |
+
+The title bar always shows the current mode.
+
+### Visual structure
+
+```
+  git diff HEAD  [t]oggle  [r]efresh             ← title bar (row 1)
+
+  src/foo.ts                      +12 -3         ← stat line (cursor)
+  lib/bar.ts                       +5 -1
+  README.md                        +2 -0
+  ─── src/foo.ts ───────────────────────         ← expanded diff block
+  @@ -10,7 +10,7 @@
+  -  return old;
+  +  return new;
+```
+
+- Stat lines show file path (left) and `+adds -dels` (right), colour-coded
+  green/red.
+- The cursor row is highlighted with a left-edge bar `▌` (same pattern as
+  `aid-sessions`).
+- Expanded diff blocks are inserted inline directly below the selected stat
+  line and removed when toggled off.
+- When the repo has no changes, a centered "no changes" message is shown.
+- When `AID_ORC_REPO` is not a git repo, a "not a git repository" message is
+  shown and no watcher is started.
+
+### Keys
+
+| Key | Action |
+|---|---|
+| `↑` / `k` | Cursor up |
+| `↓` / `j` | Cursor down |
+| `Enter` / `Space` | Toggle inline diff expand for selected file |
+| `t` | Cycle diff mode: HEAD → staged → unstaged → HEAD |
+| `r` / `Ctrl-R` | Force refresh |
+| `q` / `Esc` / `Ctrl-C` | Quit |
+
+### Env vars consumed
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `AID_DIR` | yes | Aid install root (for `palette.lua`) |
+| `AID_ORC_REPO` | yes | Git repo path to watch and diff |
+| `AID_DEBUG_LOG` | no | Enables debug logging when set |
+
+### Design notes
+
+- **No fzf, no pipes**: same fully self-contained render-loop + raw-input
+  pattern as `aid-sessions.ts`.
+- **`delta` optional**: detected at runtime via `Bun.which("delta")`. Diff
+  output is rendered as pre-coloured ANSI text regardless of which renderer is
+  used; `aid-diff` does not interpret the diff syntax itself.
+- **Palette at runtime**: same `loadPalette()` call as `aid-sessions.ts` —
+  palette.lua is the single source of truth for colours.
+- **Graceful non-repo handling**: `git rev-parse --git-dir` is run first; if
+  it fails the watcher and refresh loop are skipped and a static message is
+  shown.
+
 ## `aid-sessions-debug` — log viewer
 
 Runs in the bottom pane when `AID_DEBUG=1`. Tails `AID_DEBUG_LOG` and renders
@@ -341,7 +441,8 @@ each event with colour-coded category labels and a `+Δms` delta column.
 | `AID_ORC_NAME` | `<name>` | Session short name (without `aid@` prefix) |
 | `AID_ORC_REPO` | `<repo_path>` | Absolute path to the session's repo |
 | `AID_ORC_NAV_PANE` | `%<id>` | Pane ID of the navigator (left pane) |
-| `AID_ORC_ORC_PANE` | `%<id>` | Pane ID of the opencode TUI (right pane) |
+| `AID_ORC_ORC_PANE` | `%<id>` | Pane ID of the opencode TUI (centre pane) |
+| `AID_ORC_DIFF_PANE` | `%<id>` | Pane ID of the diff review pane (right pane) |
 | `AID_ORC_ACTIVE_CONV` | opencode session ID | Currently loaded conversation (best-effort) |
 | `AID_NVIM_SOCKET` | `/tmp/aid-nvim-<session>.sock` | Unused in orchestrator mode (no nvim pane) |
 | `AID_DEBUG_LOG` | `<repo>/log-<timestamp>.txt` | Debug log path (only when `AID_DEBUG=1`) |
